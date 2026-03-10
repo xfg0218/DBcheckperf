@@ -31,18 +31,16 @@ help:
 	@echo "  build       编译项目 (默认)"
 	@echo "  run         运行程序 (需要参数)"
 	@echo "  test        运行测试"
-	@echo "  test-demo   运行演示模式"
-	@echo "  test-data   运行数据模式"
-	@echo "  test-bench  运行基准模式"
-	@echo "  test-quick  运行快速测试"
 	@echo "  clean       清理编译文件"
 	@echo "  rebuild     重新编译"
+	@echo "  fmt         检查代码格式"
+	@echo "  lint        运行代码检查"
+	@echo "  cross-compile  交叉编译多平台版本"
 	@echo "  help        显示帮助信息"
 	@echo ""
 	@echo "示例:"
 	@echo "  make build"
 	@echo "  make run ARGS=\"-h localhost -d /tmp -r ds -v\""
-	@echo "  make test-demo"
 	@echo "  make clean"
 
 # 编译项目
@@ -60,26 +58,6 @@ run: build
 test:
 	@echo "==> 运行测试..."
 	$(GO_TEST) ./...
-
-# 演示模式
-test-demo: build
-	@echo "==> 运行演示模式..."
-	./$(BINARY_NAME) --test-demo
-
-# 数据模式
-test-data: build
-	@echo "==> 运行数据模式..."
-	./$(BINARY_NAME) --test-data
-
-# 基准模式
-test-bench: build
-	@echo "==> 运行基准模式..."
-	./$(BINARY_NAME) --test-benchmark
-
-# 快速测试
-test-quick: build
-	@echo "==> 运行快速测试..."
-	./$(BINARY_NAME) --test-quick
 
 # 清理
 clean:
@@ -113,4 +91,4 @@ cross-compile:
 	GOOS=darwin GOARCH=arm64 $(GO_BUILD) $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 $(MAIN_PATH)
 	@echo "==> 交叉编译完成"
 
-.PHONY: build run test test-demo test-data test-bench test-quick clean rebuild fmt lint cross-compile help
+.PHONY: build run test clean rebuild fmt lint cross-compile help

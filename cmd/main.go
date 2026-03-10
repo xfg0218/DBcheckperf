@@ -13,7 +13,6 @@ import (
 	"dbcheckperf/config"
 	"dbcheckperf/pkg/checker"
 	"dbcheckperf/pkg/reporter"
-	"dbcheckperf/pkg/testoutput"
 	"dbcheckperf/pkg/utils"
 )
 
@@ -22,13 +21,7 @@ const Version = "1.0.0"
 
 func main() {
 	// 解析命令行参数
-	cfg, testMode := parseFlags()
-
-	// 处理测试输出模式
-	if testMode != "" {
-		handleTestMode(testMode, cfg.Verbose)
-		return
-	}
+	cfg := parseFlags()
 
 	// 验证配置
 	if err := cfg.Validate(); err != nil {
@@ -211,29 +204,9 @@ func main() {
 	fmt.Println("测试完成。")
 }
 
-// handleTestMode 处理测试输出模式
-func handleTestMode(mode string, verbose bool) {
-	to := testoutput.NewTestOutput(verbose)
-
-	switch mode {
-	case "demo":
-		to.RunDemo()
-	case "data":
-		to.PrintTestData()
-	case "benchmark":
-		to.RunBenchmark()
-	case "quick":
-		to.RunQuickTest()
-	case "modes":
-		to.PrintTestModes()
-	default:
-		to.PrintTestModes()
-	}
-}
-
 // parseFlags 解析命令行参数
-// 返回配置对象和测试模式
-func parseFlags() (*config.Config, string) {
+// 返回配置对象
+func parseFlags() *config.Config {
 	cfg := config.DefaultConfig()
 
 	// 定义命令行参数
@@ -263,28 +236,7 @@ func parseFlags() (*config.Config, string) {
 	showVersion := flag.Bool("version", false, "显示版本号")
 	showHelp := flag.Bool("?", false, "显示帮助信息")
 
-	// 测试输出模式
-	testDemo := flag.Bool("test-demo", false, "演示模式：展示所有输出格式")
-	testData := flag.Bool("test-data", false, "数据模式：展示工具函数功能")
-	testBenchmark := flag.Bool("test-benchmark", false, "基准模式：展示硬件基准参考值")
-	testQuick := flag.Bool("test-quick", false, "快速模式：运行简化测试")
-	testModes := flag.Bool("test-modes", false, "显示测试模式说明")
-
 	flag.Parse()
-
-	// 处理测试模式
-	var testMode string
-	if *testDemo {
-		testMode = "demo"
-	} else if *testData {
-		testMode = "data"
-	} else if *testBenchmark {
-		testMode = "benchmark"
-	} else if *testQuick {
-		testMode = "quick"
-	} else if *testModes {
-		testMode = "modes"
-	}
 
 	// 处理版本
 	if *showVersion {
@@ -315,7 +267,7 @@ func parseFlags() (*config.Config, string) {
 		cfg.Verbose = true
 	}
 
-	return cfg, testMode
+	return cfg
 }
 
 // parseTestTypes 解析测试类型字符串
@@ -412,12 +364,6 @@ func printUsage() {
   --version           显示版本号
   -?                  显示帮助信息
 
-测试输出模式:
-  --test-demo         演示模式：展示所有输出格式和表格样式
-  --test-data         数据模式：展示工具函数和格式化功能
-  --test-benchmark    基准模式：展示各类硬件的基准参考值
-  --test-quick        快速模式：运行简化测试（使用模拟数据）
-
 示例:
   # 运行磁盘 I/O 和内存带宽测试
   dbcheckperf -f hosts.txt -d /data1 -d /data2 -r ds
@@ -434,9 +380,6 @@ func printUsage() {
   # 测试随机读写性能
   dbcheckperf -h localhost -d /tmp -r d --random -v
 
-  # 运行演示模式（无需测试环境）
-  dbcheckperf --test-demo
-
-  # 运行快速测试
-  dbcheckperf --test-quick -v`)
+  # 运行网络测试
+  dbcheckperf -f hosts.txt -r N -d /tmp`)
 }

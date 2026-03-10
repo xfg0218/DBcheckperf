@@ -72,15 +72,6 @@ dbcheckperf -d <临时目录>
 | `--version` | 显示版本号 | - |
 | `-?` | 显示帮助信息 | - |
 
-### 测试输出模式
-
-| 选项 | 描述 |
-|------|------|
-| `--test-demo` | 演示模式：展示所有输出格式和表格样式 |
-| `--test-data` | 数据模式：展示工具函数和格式化功能 |
-| `--test-benchmark` | 基准模式：展示各类硬件的基准参考值 |
-| `--test-quick` | 快速模式：运行简化测试（使用模拟数据） |
-
 ### 测试类型说明
 
 | 代码 | 测试类型 | 描述 |
@@ -129,25 +120,7 @@ dbcheckperf -h localhost -d /tmp -r d --random -v
 dbcheckperf -f hosts.txt -r M -d /tmp --duration 30s
 ```
 
-### 示例 6: 运行演示模式（无需测试环境）
-
-```bash
-dbcheckperf --test-demo
-```
-
-### 示例 7: 运行快速测试
-
-```bash
-dbcheckperf --test-quick -v
-```
-
-### 示例 8: 查看基准参考值
-
-```bash
-dbcheckperf --test-benchmark
-```
-
-### 示例 9: 显示详细硬件信息
+### 示例 7: 显示详细硬件信息
 
 ```bash
 dbcheckperf -d /tmp -r ds -v

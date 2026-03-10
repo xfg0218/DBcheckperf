@@ -72,15 +72,6 @@ dbcheckperf -d <temp_dir>
 | `--version` | Display version number | - |
 | `-?` | Display help information | - |
 
-### Test Output Modes
-
-| Option | Description |
-|--------|-------------|
-| `--test-demo` | Demo mode: Display all output formats and table styles |
-| `--test-data` | Data mode: Display utility functions and formatting features |
-| `--test-benchmark` | Benchmark mode: Display reference values for various hardware |
-| `--test-quick` | Quick mode: Run simplified tests (using simulated data) |
-
 ### Test Type Descriptions
 
 | Code | Test Type | Description |
@@ -129,25 +120,7 @@ dbcheckperf -h localhost -d /tmp -r d --random -v
 dbcheckperf -f hosts.txt -r M -d /tmp --duration 30s
 ```
 
-### Example 7: Run Demo Mode (No Test Environment Required)
-
-```bash
-dbcheckperf --test-demo
-```
-
-### Example 8: Run Quick Test
-
-```bash
-dbcheckperf --test-quick -v
-```
-
-### Example 9: View Benchmark Reference Values
-
-```bash
-dbcheckperf --test-benchmark
-```
-
-### Example 10: Display Detailed Hardware Information
+### Example 7: Display Detailed Hardware Information
 
 ```bash
 dbcheckperf -d /tmp -r ds -v

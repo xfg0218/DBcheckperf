@@ -20,8 +20,6 @@ dbcheckperf/
     │   └── checker.go      # 性能检查器（磁盘、网络、内存、系统）
     ├── reporter/
     │   └── reporter.go     # 报告生成器，表格格式化输出
-    ├── testoutput/
-    │   └── testoutput.go   # 测试输出生成器，演示和验证功能
     └── utils/
         └── utils.go        # 工具函数（字节转换、文件操作等）
 ```
@@ -87,12 +85,6 @@ dbcheckperf/
   - x86/x86_64: Intel/AMD 服务器 CPU
   - ARM/ARM64: Qualcomm/Ampere/Apple Silicon 等
 
-### 5. 测试输出功能（新增）
-- **演示模式** (`-test-demo`): 展示所有输出格式
-- **数据模式** (`-test-data`): 展示工具函数测试数据
-- **基准模式** (`-test-benchmark`): 展示硬件基准参考值
-- **快速模式** (`-test-quick`): 运行简化本地测试
-
 ## 构建和运行
 
 ```bash
@@ -104,12 +96,6 @@ go build -o dbcheckperf ./cmd/main.go
 
 # 运行测试
 ./dbcheckperf -h localhost -d /tmp -r ds -v
-
-# 运行演示模式（无需测试环境）
-./dbcheckperf -test-demo
-
-# 查看硬件基准参考值
-./dbcheckperf -test-benchmark
 ```
 
 ## 主要命令行选项
@@ -127,10 +113,6 @@ go build -o dbcheckperf ./cmd/main.go
 | `--duration` | 网络测试时长 | 15s |
 | `--random` | 测试随机读写性能 | false |
 | `--random-bs <KB>` | 随机读写块大小 | 4 |
-| `--test-demo` | 演示模式 | false |
-| `--test-data` | 数据模式 | false |
-| `--test-benchmark` | 基准模式 | false |
-| `--test-quick` | 快速模式 | false |
 
 ## 输出格式
 
@@ -143,11 +125,10 @@ go build -o dbcheckperf ./cmd/main.go
 ## 开发约定
 
 1. **注释**: 所有函数使用中文注释
-2. **包结构**: 
+2. **包结构**:
    - `config`: 配置相关
    - `pkg/checker`: 性能检查逻辑
    - `pkg/reporter`: 报告输出逻辑
-   - `pkg/testoutput`: 测试输出生成
    - `pkg/utils`: 通用工具函数
 3. **错误处理**: 使用 error 返回值，重要错误打印到 stderr
 4. **命名**: 使用 Go 标准命名约定（驼峰式）
