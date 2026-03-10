@@ -163,7 +163,7 @@ func (r *Reporter) PrintDiskResults(results []*checker.DiskResult, writeAgg, rea
 		fmt.Println("--- 顺序读取性能 ---")
 		r.printSeqDiskTable(results, false)
 		fmt.Println()
-		
+
 		// 检查是否有随机读写数据
 		hasRandom := false
 		for _, result := range results {
@@ -172,7 +172,7 @@ func (r *Reporter) PrintDiskResults(results []*checker.DiskResult, writeAgg, rea
 				break
 			}
 		}
-		
+
 		if hasRandom {
 			fmt.Println("--- 随机写入性能 ---")
 			r.printRandDiskTable(results, true)
@@ -190,7 +190,7 @@ func (r *Reporter) PrintDiskResults(results []*checker.DiskResult, writeAgg, rea
 	fmt.Println("--- 顺序读取汇总 ---")
 	r.printAggregate("顺序读取", readAgg)
 	fmt.Println()
-	
+
 	// 打印随机读写汇总（如果有）
 	hasRandom := false
 	for _, result := range results {
@@ -199,7 +199,7 @@ func (r *Reporter) PrintDiskResults(results []*checker.DiskResult, writeAgg, rea
 			break
 		}
 	}
-	
+
 	if hasRandom {
 		randWriteAgg := checker.AggregateDiskRandResults(results, true)
 		randReadAgg := checker.AggregateDiskRandResults(results, false)

@@ -161,7 +161,7 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 		if err == nil && dc.Verbose {
 			fmt.Printf("随机读写测试完成\n")
 		}
-		
+
 		// 计算随机读写带宽
 		if result.RandWriteTime > 0 {
 			result.RandWriteBandwidth = float64(result.RandWriteBytes) / result.RandWriteTime / (1024 * 1024)
@@ -1065,9 +1065,9 @@ func (sc *SystemChecker) getCPUModel() string {
 				}
 			}
 			// ARM/ARM64 - 不同内核版本可能格式不同
-			if strings.HasPrefix(line, "model name") || 
-			   strings.HasPrefix(line, "CPU part") || 
-			   strings.HasPrefix(line, "Features") {
+			if strings.HasPrefix(line, "model name") ||
+				strings.HasPrefix(line, "CPU part") ||
+				strings.HasPrefix(line, "Features") {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
 					model := strings.TrimSpace(parts[1])
@@ -1127,24 +1127,24 @@ func (sc *SystemChecker) parseARMModel(model string) string {
 		"0xd84": "Cortex-X925",
 		"0xd8e": "Cortex-A725",
 	}
-	
+
 	// 检查是否包含实现 ID
 	for id, name := range armImplementations {
 		if strings.Contains(strings.ToLower(model), id) {
 			return "ARM " + name
 		}
 	}
-	
+
 	// 检查是否包含厂商信息
-	if strings.Contains(strings.ToLower(model), "qualcomm") || 
-	   strings.Contains(strings.ToLower(model), "kryo") {
+	if strings.Contains(strings.ToLower(model), "qualcomm") ||
+		strings.Contains(strings.ToLower(model), "kryo") {
 		return "Qualcomm Snapdragon"
 	}
 	if strings.Contains(strings.ToLower(model), "apple") {
 		return "Apple Silicon"
 	}
-	if strings.Contains(strings.ToLower(model), "nvidia") || 
-	   strings.Contains(strings.ToLower(model), "carmel") {
+	if strings.Contains(strings.ToLower(model), "nvidia") ||
+		strings.Contains(strings.ToLower(model), "carmel") {
 		return "NVIDIA"
 	}
 	if strings.Contains(strings.ToLower(model), "ampere") {
@@ -1153,7 +1153,7 @@ func (sc *SystemChecker) parseARMModel(model string) string {
 	if strings.Contains(strings.ToLower(model), "fujitsu") {
 		return "Fujitsu A64FX"
 	}
-	
+
 	return model
 }
 

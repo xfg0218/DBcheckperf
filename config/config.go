@@ -60,10 +60,10 @@ type Config struct {
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		BlockSize:     32,    // 默认 32KB，与 Greenplum 页面大小一致
+		BlockSize:     32,      // 默认 32KB，与 Greenplum 页面大小一致
 		FileSize:      "2xRAM", // 默认使用 2 倍 RAM 大小
 		Duration:      15 * time.Second,
-		BufferSize:    8,     // 默认 8KB 发送缓冲区
+		BufferSize:    8, // 默认 8KB 发送缓冲区
 		TestTypes:     []TestType{TestDisk, TestStream, TestNetworkSerial},
 		TestRandom:    false, // 默认不测试随机读写
 		RandBlockSize: 4,     // 随机读写默认 4KB
