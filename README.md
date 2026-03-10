@@ -1,293 +1,295 @@
-# dbcheckperf - 数据库性能检查工具
+# dbcheckperf - Database Performance Check Tool
 
-dbcheckperf 是一个用 Go 语言编写的数据库性能检查工具，基于 Greenplum gpcheckperf 工具的功能实现。它用于测试和验证主机硬件性能，包括磁盘 I/O、内存带宽和网络性能。
+dbcheckperf is a database performance check tool written in Go, based on the Greenplum gpcheckperf utility. It is used to test and verify host hardware performance, including disk I/O, memory bandwidth, and network performance.
 
-## 功能特性
+**[中文版本](README_CN.md)**
 
-- **磁盘 I/O 测试**: 使用 `dd` 命令测试顺序读写性能，单次测试快速完成，使用 `oflag=direct` 和 `conv=fsync` 确保测试准确性
-- **随机读写测试**: 支持 4K 随机读写性能测试，使用 `dd` 命令配合 `seek/skip` 参数进行随机位置读写
-- **内存带宽测试**: 使用 STREAM 基准测试方法（Go 实现），实际执行 Copy/Scale/Add/Triad 内存操作测试
-- **网络性能测试**: 支持 iperf3/netperf/curl/TCP 流多种测试方法，自动选择最佳测试工具
-- **系统信息收集**: 自动收集 CPU 核心数、内存大小、网卡速率等信息
-- **硬件检测**: 检测虚拟机/物理机、RAID 卡型号、条带大小、网卡绑定、队列大小等
-- **多架构支持**: 兼容 x86/x86_64 (Intel/AMD) 和 ARM/ARM64 架构服务器
-- **表格化输出**: 清晰展示每台主机的测试结果和汇总统计
-- **快速测试**: 单次迭代测试，快速完成性能检查
+## Features
 
-## 安装
+- **Disk I/O Testing**: Uses `dd` command to test sequential read/write performance, single iteration for fast completion, uses `oflag=direct` and `conv=fsync` for accurate results
+- **Random I/O Testing**: Supports 4K random read/write performance testing using `dd` with `seek/skip` parameters for random position access
+- **Memory Bandwidth Testing**: Uses STREAM benchmark method (Go implementation), actually executes Copy/Scale/Add/Triad memory operations
+- **Network Performance Testing**: Supports iperf3/netperf/curl/TCP stream multiple test methods, automatically selects the best tool
+- **System Information Collection**: Automatically collects CPU cores, memory size, network card speed, etc.
+- **Hardware Detection**: Detects VM/physical machine, RAID card model, stripe size, network bonding, queue size, etc.
+- **Multi-Architecture Support**: Compatible with x86/x86_64 (Intel/AMD) and ARM/ARM64 architecture servers
+- **Tabular Output**: Clearly displays test results and summary statistics for each host
+- **Quick Testing**: Single iteration testing for fast performance checks
 
-### 环境要求
+## Installation
 
-- Go 1.21 或更高版本
+### Requirements
 
-### 编译
+- Go 1.21 or higher
+
+### Build
 
 ```bash
-# 克隆或进入项目目录
-cd /data/data/com.termux/files/home/project/dbcheckperf
+# Clone or enter project directory
+cd /path/to/dbcheckperf
 
-# 编译
+# Build
 go build -o dbcheckperf ./cmd/main.go
 
-# 安装到 GOPATH
+# Install to GOPATH
 go install .
 ```
 
-## 使用方法
+## Usage
 
-### 基本语法
+### Basic Syntax
 
 ```bash
-# 磁盘 I/O 和内存带宽测试
-dbcheckperf -d <测试目录> [-d <测试目录> ...]
-     {-f <主机文件> | -h <主机名> [-h <主机名> ...]}
-     [-r ds] [-B <块大小>] [-S <文件大小>] [-D] [-v|-V]
+# Disk I/O and memory bandwidth testing
+dbcheckperf -d <test_dir> [-d <test_dir> ...]
+     {-f <hostfile> | -h <host> [-h <host> ...]}
+     [-r ds] [-B <block_size>] [-S <file_size>] [-D] [-v|-V]
 
-# 网络测试
-dbcheckperf -d <临时目录>
-     {-f <主机文件> | -h <主机名> [-h <主机名> ...]}
-     [-r n|N|M [--duration <时间>]] [-D] [-v|-V] [--buffer-size <KB>]
+# Network testing
+dbcheckperf -d <temp_dir>
+     {-f <hostfile> | -h <host> [-h <host> ...]}
+     [-r n|N|M [--duration <time>]] [-D] [-v|-V] [--buffer-size <KB>]
 ```
 
-### 命令行选项
+### Command Line Options
 
-| 选项 | 描述 | 默认值 |
-|------|------|--------|
-| `-B <块大小>` | 磁盘 I/O 测试块大小 (KB) | 32KB |
-| `-d <目录>` | 测试目录（可多次指定） | 必需 |
-| `-D` | 显示每台主机的详细结果 | false |
-| `-f <主机文件>` | 包含主机列表的文件 | - |
-| `-h <主机名>` | 主机名（可多次指定） | - |
-| `-r <测试类型>` | 测试类型：d=磁盘，s=内存流，n/N/M=网络 | dsn |
-| `-S <文件大小>` | 磁盘 I/O 测试文件大小 | 2xRAM |
-| `-v` | 详细模式 | false |
-| `-V` | 非常详细模式 | false |
-| `--duration <时间>` | 网络测试持续时间 | 15s |
-| `--netperf` | 使用 netperf 进行网络测试 | false |
-| `--buffer-size <KB>` | 网络测试缓冲区大小 | 8KB |
-| `--random` | 测试随机读写性能 | false |
-| `--random-bs <KB>` | 随机读写块大小 (KB) | 4KB |
-| `--version` | 显示版本号 | - |
-| `-?` | 显示帮助信息 | - |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-B <block_size>` | Disk I/O test block size (KB) | 32KB |
+| `-d <dir>` | Test directory (can be specified multiple times) | Required |
+| `-D` | Display detailed results per host | false |
+| `-f <hostfile>` | File containing host list | - |
+| `-h <host>` | Hostname (can be specified multiple times) | - |
+| `-r <test_type>` | Test type: d=disk, s=memory stream, n/N/M=network | dsn |
+| `-S <file_size>` | Disk I/O test file size | 2xRAM |
+| `-v` | Verbose mode | false |
+| `-V` | Very verbose mode | false |
+| `--duration <time>` | Network test duration | 15s |
+| `--netperf` | Use netperf for network testing | false |
+| `--buffer-size <KB>` | Network test buffer size | 8KB |
+| `--random` | Test random read/write performance | false |
+| `--random-bs <KB>` | Random I/O block size (KB) | 4KB |
+| `--version` | Display version number | - |
+| `-?` | Display help information | - |
 
-### 测试输出模式
+### Test Output Modes
 
-| 选项 | 描述 |
-|------|------|
-| `--test-demo` | 演示模式：展示所有输出格式和表格样式 |
-| `--test-data` | 数据模式：展示工具函数和格式化功能 |
-| `--test-benchmark` | 基准模式：展示各类硬件的基准参考值 |
-| `--test-quick` | 快速模式：运行简化测试（使用模拟数据） |
+| Option | Description |
+|--------|-------------|
+| `--test-demo` | Demo mode: Display all output formats and table styles |
+| `--test-data` | Data mode: Display utility functions and formatting features |
+| `--test-benchmark` | Benchmark mode: Display reference values for various hardware |
+| `--test-quick` | Quick mode: Run simplified tests (using simulated data) |
 
-### 测试类型说明
+### Test Type Descriptions
 
-| 代码 | 测试类型 | 描述 |
-|------|----------|------|
-| `d` | 磁盘 I/O | 测试顺序读写性能 |
-| `s` | 内存流 | 测试内存带宽 |
-| `n` | 网络串行 | 逐台主机测试网络 |
-| `N` | 网络并行 | 同时向所有主机测试（需偶数台主机） |
-| `M` | 网络全矩阵 | 每台主机与其他所有主机互测 |
+| Code | Test Type | Description |
+|------|-----------|-------------|
+| `d` | Disk I/O | Test sequential read/write performance |
+| `s` | Memory Stream | Test memory bandwidth |
+| `n` | Network Serial | Test network host by host |
+| `N` | Network Parallel | Test all hosts simultaneously (requires even number of hosts) |
+| `M` | Network Full Matrix | Each host tests with all other hosts |
 
-## 使用示例
+## Examples
 
-### 示例 1: 运行磁盘 I/O 和内存带宽测试
+### Example 1: Run Disk I/O and Memory Bandwidth Tests
 
 ```bash
 dbcheckperf -f hosts.txt -d /data1 -d /data2 -r ds
 ```
 
-### 示例 2: 仅运行磁盘 I/O 测试，显示每台主机结果
+### Example 2: Run Disk I/O Test Only, Display Per-Host Results
 
 ```bash
 dbcheckperf -h host1 -h host2 -d /data1 -r d -D -v
 ```
 
-### 示例 3: 运行并行网络测试
+### Example 3: Run Parallel Network Test
 
 ```bash
 dbcheckperf -f hosts.txt -r N -d /tmp
 ```
 
-### 示例 4: 使用自定义文件大小和块大小
+### Example 4: Use Custom File Size and Block Size
 
 ```bash
 dbcheckperf -h localhost -d /tmp -B 16k -S 5GB -r ds
 ```
 
-### 示例 5: 测试随机读写性能
+### Example 5: Test Random I/O Performance
 
 ```bash
 dbcheckperf -h localhost -d /tmp -r d --random -v
 ```
 
-### 示例 6: 运行全矩阵网络测试
+### Example 6: Run Full Matrix Network Test
 
 ```bash
 dbcheckperf -f hosts.txt -r M -d /tmp --duration 30s
 ```
 
-### 示例 6: 运行演示模式（无需测试环境）
+### Example 7: Run Demo Mode (No Test Environment Required)
 
 ```bash
 dbcheckperf --test-demo
 ```
 
-### 示例 7: 运行快速测试
+### Example 8: Run Quick Test
 
 ```bash
 dbcheckperf --test-quick -v
 ```
 
-### 示例 8: 查看基准参考值
+### Example 9: View Benchmark Reference Values
 
 ```bash
 dbcheckperf --test-benchmark
 ```
 
-### 示例 9: 显示详细硬件信息
+### Example 10: Display Detailed Hardware Information
 
 ```bash
 dbcheckperf -d /tmp -r ds -v
 ```
 
-## 输出格式
+## Output Format
 
-### 系统信息表格
+### System Information Table
 
 ```
 ====================
-==  系统信息
+==  System Information
 ====================
 
-主机名                虚拟化      CPU 型号                    CPU 核心数     内存大小        操作系统           内核版本              网卡速率
+Hostname            Virtualization  CPU Model                    CPU Cores   Memory Size    OS                Kernel Version        Network Speed
 ----------------------------------------------------------------------------------------------------------------------------------
-server1               物理机      Intel Xeon E5-2680         16           64.00 GB       CentOS 7.9       3.10.0-1160         10000 Mbps
-server2               KVM         AMD EPYC 7K62              32           128.00 GB      Ubuntu 20.04     5.4.0-42            25000 Mbps
+server1             Physical        Intel Xeon E5-2680           16          64.00 GB       CentOS 7.9        3.10.0-1160           10000 Mbps
+server2             KVM             AMD EPYC 7K62                32          128.00 GB      Ubuntu 20.04      5.4.0-42              25000 Mbps
 ```
 
-### 硬件详细信息表格
+### Detailed Hardware Information Table
 
 ```
 ====================
-==  硬件详细信息
+==  Detailed Hardware Information
 ====================
 
---- RAID 信息 ---
+--- RAID Information ---
 
-主机名                状态              RAID 型号                             缓存大小            条带大小         RAID 级别        
+Hostname            Status          RAID Model                            Cache Size        Stripe Size    RAID Level
 -------------------------------------------------------------------------------------------------------------------
-server1               已检测             LSI MegaRAID SAS 3508               2.00 GB         256 KB       RAID10         
-server2               已检测             Broadcom MegaRAID SAS 9460-16i      4.00 GB         512 KB       RAID5          
+server1             Detected        LSI MegaRAID SAS 3508                 2.00 GB           256 KB         RAID10
+server2             Detected        Broadcom MegaRAID SAS 9460-16i        4.00 GB           512 KB         RAID5
 
---- 网络绑定信息 ---
+--- Network Bonding Information ---
 
-主机名                绑定状态         绑定模式                                从网卡数         队列大小        
+Hostname            Bond Status     Bond Mode                             Slave Count      Queue Size
 -----------------------------------------------------------------------------------------------
-server1               已绑定          802.3ad Dynamic link aggregation    2            1024        
-server2               未绑定          -                                   -            1000        
+server1             Bonded          802.3ad Dynamic link aggregation      2                1024
+server2             Unbonded        -                                     -                1000
 ```
 
-### 磁盘测试结果表格
-
-```
-====================
-==  磁盘 I/O 测试结果
-====================
-
---- 顺序写入性能 ---
-主机名                时间 (秒)        数据量          带宽 (MB/s)      
------------------------------------------------------------------
-server1               2.68s          7.7 GB           2872.06        
-server2               2.52s          7.7 GB           3065.45        
-
---- 顺序读取性能 ---
-主机名                时间 (秒)        数据量          带宽 (MB/s)      
------------------------------------------------------------------
-server1               2.26s          7.7 GB           3408.01        
-server2               2.15s          7.7 GB           3586.12        
-
---- 随机写入性能 ---
-主机名                时间 (秒)        数据量          带宽 (MB/s)      
------------------------------------------------------------------
-server1               120.50s        4.00 GB          35.64          
-server2               125.20s        4.00 GB          34.30          
-
---- 随机读取性能 ---
-主机名                时间 (秒)        数据量          带宽 (MB/s)      
------------------------------------------------------------------
-server1               85.30s         4.00 GB          50.35          
-server2               88.70s         4.00 GB          48.42          
-```
-
-### 网络测试结果
+### Disk Test Results Table
 
 ```
 ====================
-==  网络性能测试结果
+==  Disk I/O Test Results
 ====================
 
-测试模式：并行模式
+--- Sequential Write Performance ---
+Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+-----------------------------------------------------------------
+server1             2.68s           7.7 GB         2872.06
+server2             2.52s           7.7 GB         3065.45
 
---- 汇总 ---
-总带宽：450.25 MB/s
-平均带宽：112.56 MB/s
-中位带宽：110.88 MB/s
-最小带宽：105.53 MB/s
-最大带宽：120.45 MB/s
+--- Sequential Read Performance ---
+Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+-----------------------------------------------------------------
+server1             2.26s           7.7 GB         3408.01
+server2             2.15s           7.7 GB         3586.12
+
+--- Random Write Performance ---
+Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+-----------------------------------------------------------------
+server1             120.50s         4.00 GB        35.64
+server2             125.20s         4.00 GB        34.30
+
+--- Random Read Performance ---
+Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+-----------------------------------------------------------------
+server1             85.30s          4.00 GB        50.35
+server2             88.70s          4.00 GB        48.42
 ```
 
-### 汇总报告
+### Network Test Results
+
+```
+====================
+==  Network Performance Test Results
+====================
+
+Test Mode: Parallel Mode
+
+--- Summary ---
+Total Bandwidth: 450.25 MB/s
+Average Bandwidth: 112.56 MB/s
+Median Bandwidth: 110.88 MB/s
+Minimum Bandwidth: 105.53 MB/s
+Maximum Bandwidth: 120.45 MB/s
+```
+
+### Summary Report
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║                      测 试 汇 总 报 告                        ║
+║                    T E S T   S U M M A R Y                    ║
 ╠══════════════════════════════════════════════════════════════╣
-║  顺序写入带宽：2872.06 MB/s [server1]                        ║
-║  顺序读取带宽：3408.01 MB/s [server1]                        ║
-║  随机写入带宽：35.64 MB/s [server1]                          ║
-║  随机读取带宽：50.35 MB/s [server1]                          ║
-║  内存带宽：181397.02 MB/s [server1]                          ║
-║  网络带宽：110.56 MB/s                                       ║
+║  Sequential Write Bandwidth: 2872.06 MB/s [server1]          ║
+║  Sequential Read Bandwidth: 3408.01 MB/s [server1]           ║
+║  Random Write Bandwidth: 35.64 MB/s [server1]                ║
+║  Random Read Bandwidth: 50.35 MB/s [server1]                 ║
+║  Memory Bandwidth: 181397.02 MB/s [server1]                  ║
+║  Network Bandwidth: 110.56 MB/s                              ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
-### 综合测试结果表格
+### Comprehensive Test Results Table
 
 ```
 ====================
-==  综合测试结果表
+==  Comprehensive Test Results
 ====================
 
-测试项目                 结果                  备注
+Test Item              Result               Notes
 --------------------------------------------------------------
-顺序写入                 2872.06 MB/s       单次测试
-顺序读取                 3408.01 MB/s       单次测试
-随机写入 (4K)            35.64 MB/s         单次测试
-随机读取 (4K)            50.35 MB/s         单次测试
-内存带宽                 181397.02 MB/s     单次测试
-网络带宽                 110.56 MB/s        单次测试
+Sequential Write       2872.06 MB/s        Single iteration
+Sequential Read        3408.01 MB/s        Single iteration
+Random Write (4K)      35.64 MB/s          Single iteration
+Random Read (4K)       50.35 MB/s          Single iteration
+Memory Bandwidth       181397.02 MB/s      Single iteration
+Network Bandwidth      110.56 MB/s         Single iteration
 ```
 
-## 主机文件格式
+## Host File Format
 
-主机文件每行包含一个主机名，可选格式：
+Each line in the host file contains a hostname, with optional format:
 
 ```
-# 基本格式
+# Basic format
 hostname
 
-# 带用户名
+# With username
 username@hostname
 
-# 带 SSH 端口
+# With SSH port
 hostname:2222
 
-# 完整格式
+# Full format
 username@hostname:port
 ```
 
-示例 `hosts.txt`:
+Example `hosts.txt`:
 
 ```
 server1
@@ -296,94 +298,94 @@ gpadmin@server3:2222
 192.168.1.100
 ```
 
-## 项目结构
+## Project Structure
 
 ```
 dbcheckperf/
 ├── cmd/
-│   └── main.go             # 主程序入口
-├── go.mod                  # Go 模块定义
-├── README.md               # 本文档
+│   └── main.go             # Main entry point
+├── go.mod                  # Go module definition
+├── README.md               # This document
 ├── config/
-│   └── config.go           # 配置管理
+│   └── config.go           # Configuration management
 └── pkg/
     ├── checker/
-    │   └── checker.go      # 性能检查器（磁盘、网络、内存、系统）
+    │   └── checker.go      # Performance checker (disk, network, memory, system)
     ├── reporter/
-    │   └── reporter.go     # 报告生成器（表格输出）
+    │   └── reporter.go     # Report generator (table output)
     └── utils/
-        └── utils.go        # 工具函数
+        └── utils.go        # Utility functions
 ```
 
-## 性能阈值参考
+## Performance Threshold Reference
 
-| 测试类型 | 最低期望值 | 说明 |
-|----------|------------|------|
-| 网络带宽 | 100 MB/s | 低于此值建议使用 `-r n` 进行串行测试 |
-| 磁盘写入 | 100 MB/s | 取决于存储类型（HDD/SSD） |
-| 内存带宽 | 20000 MB/s | 取决于内存类型和通道数 |
+| Test Type | Minimum Expected Value | Description |
+|-----------|------------------------|-------------|
+| Network Bandwidth | 100 MB/s | Below this value, use `-r n` for serial testing |
+| Disk Write | 100 MB/s | Depends on storage type (HDD/SSD) |
+| Memory Bandwidth | 20000 MB/s | Depends on memory type and channel count |
 
-## 注意事项
+## Notes
 
-1. **测试目录权限**: 运行工具的用户必须对所有测试目录有写入权限
-2. **文件大小**: 磁盘测试文件大小建议设置为 2 倍系统 RAM，确保测试的是磁盘 I/O 而非内存缓存
-3. **网络子网**: 网络测试时，主机文件中的所有主机应在同一子网内
-4. **并行模式**: 网络并行模式 (`-r N`) 建议使用偶数台主机
-5. **SSH 信任**: 多主机测试需要配置 SSH 免密登录
+1. **Test Directory Permissions**: Users running the tool must have write permissions to all test directories
+2. **File Size**: Disk test file size is recommended to be set to 2x system RAM to ensure disk I/O is tested rather than memory cache
+3. **Network Subnet**: All hosts in the host file should be on the same subnet during network testing
+4. **Parallel Mode**: Network parallel mode (`-r N`) recommends using an even number of hosts
+5. **SSH Trust**: Multi-host testing requires SSH passwordless login configuration
 
-## 测试严谨性说明
+## Test Rigor Description
 
-### 磁盘 I/O 测试
-- **直接 I/O**: 使用 `oflag=direct` 和 `iflag=direct` 绕过系统缓存
-- **数据同步**: 使用 `conv=fsync` 确保数据真正写入磁盘
-- **缓存清空**: 每次读取测试前清空系统缓存
-- **数据验证**: 验证写入数据完整性，允许 1% 误差
-- **快速测试**: 单次测试快速完成
-- **文件清理**: 测试完成后自动删除测试文件
+### Disk I/O Testing
+- **Direct I/O**: Uses `oflag=direct` and `iflag=direct` to bypass system cache
+- **Data Sync**: Uses `conv=fsync` to ensure data is actually written to disk
+- **Cache Clear**: Clears system cache before each read test
+- **Data Validation**: Validates write data integrity with 1% tolerance
+- **Quick Test**: Single iteration for fast completion
+- **File Cleanup**: Automatically deletes test files after testing
 
-### 随机读写测试（新增）
-- **4K 随机**: 默认使用 4KB 块大小进行随机读写测试
-- **随机位置**: 使用 `seek/skip` 参数随机定位读写位置
-- **多次操作**: 执行 1000 次随机读写操作
-- **直接 I/O**: 使用 `oflag=direct` 和 `iflag=direct` 绕过缓存
+### Random I/O Testing (New)
+- **4K Random**: Uses 4KB block size for random read/write testing by default
+- **Random Position**: Uses `seek/skip` parameters for random read/write positioning
+- **Multiple Operations**: Executes 1000 random read/write operations
+- **Direct I/O**: Uses `oflag=direct` and `iflag=direct` to bypass cache
 
-### 内存带宽测试
-- **实际测试**: 使用 Go 实现 STREAM 基准测试，实际执行内存操作
-- **四种操作**: Copy、Scale、Add、Triad 四种内存操作测试
-- **大数组**: 使用 80MB 测试数组，确保测试结果准确
-- **快速测试**: 单次测试快速完成
+### Memory Bandwidth Testing
+- **Actual Testing**: Uses Go implementation of STREAM benchmark, actually executes memory operations
+- **Four Operations**: Copy, Scale, Add, Triad four memory operation tests
+- **Large Array**: Uses 80MB test array to ensure accurate results
+- **Quick Test**: Single iteration for fast completion
 
-### 网络性能测试
-- **多种方法**: 优先使用 iperf3，其次 netperf，备用 TCP 流测试
-- **超时控制**: 设置合理的连接和传输超时时间
-- **数据验证**: 验证实际传输的字节数和时间
-- **快速测试**: 单次测试快速完成
+### Network Performance Testing
+- **Multiple Methods**: Prefers iperf3, then netperf, fallback to TCP stream testing
+- **Timeout Control**: Sets reasonable connection and transfer timeouts
+- **Data Validation**: Validates actual bytes transferred and time
+- **Quick Test**: Single iteration for fast completion
 
-### 系统信息检测（多架构支持）
-- **x86/x86_64**: 支持 Intel 和 AMD 服务器 CPU 检测
-- **ARM/ARM64**: 支持 ARM 架构服务器（包括 Qualcomm、Ampere、Apple Silicon 等）
-- **虚拟化检测**: 支持 KVM、VMware、Xen、Hyper-V 等虚拟化类型
-- **RAID 检测**: 支持 LSI/Broadcom MegaRAID 等 RAID 卡检测
+### System Information Detection (Multi-Architecture Support)
+- **x86/x86_64**: Supports Intel and AMD server CPU detection
+- **ARM/ARM64**: Supports ARM architecture servers (including Qualcomm, Ampere, Apple Silicon, etc.)
+- **Virtualization Detection**: Supports KVM, VMware, Xen, Hyper-V and other virtualization types
+- **RAID Detection**: Supports LSI/Broadcom MegaRAID and other RAID card detection
 
-## 与 gpcheckperf 的兼容性
+## Compatibility with gpcheckperf
 
-本工具实现了 Greenplum gpcheckperf 的主要功能：
+This tool implements the main features of Greenplum gpcheckperf:
 
-| 功能 | gpcheckperf | dbcheckperf |
-|------|-------------|-------------|
-| 磁盘 I/O 测试 | ✓ | ✓ |
-| 内存带宽测试 | ✓ | ✓ |
-| 网络性能测试 | ✓ | ✓ |
-| 主机文件支持 | ✓ | ✓ |
-| 多目录测试 | ✓ | ✓ |
-| 详细模式 | ✓ | ✓ |
-| 每主机结果 | ✓ | ✓ |
-| netperf 支持 | ✓ | ✓ |
+| Feature | gpcheckperf | dbcheckperf |
+|---------|-------------|-------------|
+| Disk I/O Testing | ✓ | ✓ |
+| Memory Bandwidth Testing | ✓ | ✓ |
+| Network Performance Testing | ✓ | ✓ |
+| Host File Support | ✓ | ✓ |
+| Multi-Directory Testing | ✓ | ✓ |
+| Verbose Mode | ✓ | ✓ |
+| Per-Host Results | ✓ | ✓ |
+| netperf Support | ✓ | ✓ |
 
-## 许可证
+## License
 
-本项目采用 MIT 许可证。
+This project is licensed under the MIT License.
 
-## 贡献
+## Contributing
 
-欢迎提交问题和功能请求！
+Issues and feature requests are welcome!
