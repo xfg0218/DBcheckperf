@@ -94,18 +94,62 @@ func main() {
 			}
 		}
 
-		// 创建磁盘检查器
-		diskChecker := checker.NewDiskCheckerWithRandom(cfg.BlockSize, fileSize, cfg.Verbose, cfg.TestRandom, cfg.RandBlockSize)
+		// 检查是否指定了多台主机
+		if len(cfg.Hosts) > 0 {
+			// 多主机模式：通过 SSH 在每台主机上执行磁盘测试
+			rep.PrintProgress(fmt.Sprintf("在 %d 台远程主机上执行磁盘测试...", len(cfg.Hosts)))
 
-		// 对每个测试目录运行测试
-		for _, dir := range cfg.TestDirs {
-			rep.PrintProgress(fmt.Sprintf("测试目录：%s", dir))
-			result, err := diskChecker.Run(dir)
-			if err != nil {
-				rep.PrintError(fmt.Errorf("目录 %s 测试失败：%v", dir, err))
-				continue
+			// 获取本地主机名
+			localHost, _ := os.Hostname()
+			if localHost == "" {
+				localHost = "localhost"
 			}
-			diskResults = append(diskResults, result)
+
+			// 对每台主机执行测试
+			for _, host := range cfg.Hosts {
+				// 检查是否为本地主机
+				isLocal := (host == localHost || host == "localhost" || host == "127.0.0.1")
+
+				for _, dir := range cfg.TestDirs {
+					if cfg.Verbose {
+						fmt.Printf("测试主机 %s，目录 %s\n", host, dir)
+					}
+
+					var result *checker.DiskResult
+					var err error
+
+					if isLocal {
+						// 本地主机，直接运行
+						diskChecker := checker.NewDiskCheckerWithRandom(cfg.BlockSize, fileSize, cfg.Verbose, cfg.TestRandom, cfg.RandBlockSize)
+						result, err = diskChecker.Run(dir)
+					} else {
+						// 远程主机，通过 SSH 运行
+						diskChecker := checker.NewDiskCheckerWithRandom(cfg.BlockSize, fileSize, cfg.Verbose, cfg.TestRandom, cfg.RandBlockSize)
+						result, err = diskChecker.RunRemote(host, dir)
+					}
+
+					if err != nil {
+						rep.PrintVerbose("警告：主机 %s 目录 %s 测试失败：%v\n", host, dir, err)
+						continue
+					}
+					diskResults = append(diskResults, result)
+				}
+			}
+		} else {
+			// 单机模式：仅在本机执行测试
+			// 创建磁盘检查器
+			diskChecker := checker.NewDiskCheckerWithRandom(cfg.BlockSize, fileSize, cfg.Verbose, cfg.TestRandom, cfg.RandBlockSize)
+
+			// 对每个测试目录运行测试
+			for _, dir := range cfg.TestDirs {
+				rep.PrintProgress(fmt.Sprintf("测试目录：%s", dir))
+				result, err := diskChecker.Run(dir)
+				if err != nil {
+					rep.PrintError(fmt.Errorf("目录 %s 测试失败：%v", dir, err))
+					continue
+				}
+				diskResults = append(diskResults, result)
+			}
 		}
 
 		if len(diskResults) > 0 {

@@ -62,6 +62,8 @@ type DiskChecker struct {
 	TestRandom bool
 	// RandBlockSize 随机读写块大小（KB）
 	RandBlockSize int
+	// Host 远程主机名（用于远程测试）
+	Host string
 }
 
 // NewDiskChecker 创建新的磁盘检查器
@@ -175,6 +177,227 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 	os.Remove(testFile)
 
 	return result, nil
+}
+
+// RunRemote 通过 SSH 在远程主机执行磁盘 I/O 测试
+// 参数 host: 远程主机名或 IP 地址
+// 参数 dir: 远程主机上的测试目录
+// 返回：包含远程主机磁盘测试结果的 DiskResult 结构体
+func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
+	result := &DiskResult{
+		Host: host,
+		Dir:  dir,
+	}
+
+	// 计算测试文件大小
+	testSize := dc.FileSize
+	if testSize == 0 {
+		// 默认使用 2 倍 RAM，远程主机需要通过 SSH 获取
+		ramStr, err := dc.runSSHCommand(host, "free -b | grep Mem | awk '{print $2}'")
+		if err != nil {
+			ramStr = "2147483648" // 默认 2GB
+		}
+		ram, _ := strconv.ParseUint(strings.TrimSpace(ramStr), 10, 64)
+		if ram == 0 {
+			ram = 2 * 1024 * 1024 * 1024
+		}
+		testSize = ram
+	}
+
+	// 计算块大小和计数
+	blockSize := dc.BlockSize * 1024 // 转换为字节
+	count := int(testSize / uint64(blockSize))
+	if count == 0 {
+		count = 1
+	}
+
+	// 生成测试文件名
+	testFile := fmt.Sprintf("%s/dd_test_%d", dir, time.Now().UnixNano())
+
+	if dc.Verbose {
+		fmt.Printf("远程磁盘测试：%s@%s\n", testFile, host)
+	}
+
+	// 执行写入测试
+	writeCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=%d oflag=direct conv=fsync 2>&1",
+		testFile, blockSize, count)
+	writeOutput, writeTime, err := dc.runSSHCommandWithTime(host, writeCmd)
+	var writeBytes uint64
+	if err == nil {
+		writeBytes = dc.parseDDOutput(writeOutput)
+		if writeBytes == 0 {
+			writeBytes = uint64(blockSize * count)
+		}
+	}
+
+	// 清空远程缓存
+	dc.dropRemoteCaches(host)
+
+	// 执行读取测试
+	readCmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d iflag=direct 2>&1", testFile, blockSize)
+	readOutput, readTime, err := dc.runSSHCommandWithTime(host, readCmd)
+	var readBytes uint64
+	if err == nil {
+		readBytes = dc.parseDDOutput(readOutput)
+		if readBytes == 0 {
+			readBytes = writeBytes
+		}
+	}
+
+	// 设置顺序读写结果
+	if writeTime > 0 {
+		result.WriteTime = writeTime
+		result.WriteBytes = writeBytes
+		result.WriteBandwidth = float64(writeBytes) / writeTime / (1024 * 1024)
+	}
+
+	if readTime > 0 {
+		result.ReadTime = readTime
+		result.ReadBytes = readBytes
+		result.ReadBandwidth = float64(readBytes) / readTime / (1024 * 1024)
+	}
+
+	// 执行随机读写测试（如果启用）
+	if dc.TestRandom {
+		randWriteBytes, randWriteTime, randReadBytes, randReadTime, err := dc.runRemoteRandomTest(host, testFile)
+		if err == nil && dc.Verbose {
+			fmt.Printf("远程随机读写测试完成\n")
+		}
+
+		// 计算随机读写带宽
+		if randWriteTime > 0 {
+			result.RandWriteTime = randWriteTime
+			result.RandWriteBytes = randWriteBytes
+			result.RandWriteBandwidth = float64(randWriteBytes) / randWriteTime / (1024 * 1024)
+		}
+		if randReadTime > 0 {
+			result.RandReadTime = randReadTime
+			result.RandReadBytes = randReadBytes
+			result.RandReadBandwidth = float64(randReadBytes) / randReadTime / (1024 * 1024)
+		}
+	}
+
+	// 清理远程测试文件
+	dc.runSSHCommand(host, fmt.Sprintf("rm -f %s", testFile))
+
+	return result, nil
+}
+
+// runSSHCommand 通过 SSH 执行远程命令并返回输出
+func (dc *DiskChecker) runSSHCommand(host string, command string) (string, error) {
+	cmd := exec.Command("ssh",
+		"-o", "ConnectTimeout=5",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		host, command)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("SSH 命令执行失败：%v", err)
+	}
+	return string(output), nil
+}
+
+// runSSHCommandWithTime 通过 SSH 执行远程命令并返回输出和执行时间
+func (dc *DiskChecker) runSSHCommandWithTime(host string, command string) (string, float64, error) {
+	start := time.Now()
+	output, err := dc.runSSHCommand(host, command)
+	duration := time.Since(start).Seconds()
+	return output, duration, err
+}
+
+// dropRemoteCaches 清空远程主机系统缓存
+func (dc *DiskChecker) dropRemoteCaches(host string) {
+	// 尝试清空页面缓存、dentries 和 inodes
+	dc.runSSHCommand(host, "sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true")
+	// 短暂等待让缓存清空生效
+	time.Sleep(100 * time.Millisecond)
+}
+
+// runRemoteRandomTest 执行远程随机读写测试
+func (dc *DiskChecker) runRemoteRandomTest(host string, testFile string) (uint64, float64, uint64, float64, error) {
+	// 获取文件大小
+	sizeOutput, err := dc.runSSHCommand(host, fmt.Sprintf("stat -c %%s %s 2>/dev/null || stat -f %%z %s 2>/dev/null", testFile, testFile))
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("无法获取远程测试文件大小：%v", err)
+	}
+	fileSize, _ := strconv.ParseUint(strings.TrimSpace(sizeOutput), 10, 64)
+
+	// 随机读写块大小
+	randBlockSize := dc.RandBlockSize * 1024 // 转换为字节
+	randCount := 1000                        // 随机操作次数
+
+	// 随机写入测试
+	randWriteStart := time.Now()
+	randWriteBytes, err := dc.runRemoteRandomWrite(host, testFile, randBlockSize, randCount, fileSize)
+	randWriteDuration := time.Since(randWriteStart).Seconds()
+
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("远程随机写入测试失败：%v", err)
+	}
+
+	// 清空远程缓存
+	dc.dropRemoteCaches(host)
+
+	// 随机读取测试
+	randReadStart := time.Now()
+	randReadBytes, err := dc.runRemoteRandomRead(host, testFile, randBlockSize, randCount, fileSize)
+	randReadDuration := time.Since(randReadStart).Seconds()
+
+	if err != nil {
+		return randWriteBytes, randWriteDuration, 0, 0, fmt.Errorf("远程随机读取测试失败：%v", err)
+	}
+
+	return randWriteBytes, randWriteDuration, randReadBytes, randReadDuration, nil
+}
+
+// runRemoteRandomWrite 执行远程随机写入测试
+func (dc *DiskChecker) runRemoteRandomWrite(host string, testFile string, blockSize, count int, fileSize uint64) (uint64, error) {
+	totalBytes := uint64(0)
+
+	for i := 0; i < count; i++ {
+		// 计算随机偏移量（以块为单位）
+		maxBlock := int64(fileSize) / int64(blockSize)
+		offset := int64(0)
+		if maxBlock > 1 {
+			offset = time.Now().UnixNano() % maxBlock
+		}
+
+		// 使用 dd 进行随机位置写入
+		cmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=1 seek=%d oflag=direct conv=notrunc,fsync 2>/dev/null",
+			testFile, blockSize, offset)
+		_, err := dc.runSSHCommand(host, cmd)
+		if err == nil {
+			totalBytes += uint64(blockSize)
+		}
+	}
+
+	return totalBytes, nil
+}
+
+// runRemoteRandomRead 执行远程随机读取测试
+func (dc *DiskChecker) runRemoteRandomRead(host string, testFile string, blockSize, count int, fileSize uint64) (uint64, error) {
+	totalBytes := uint64(0)
+
+	for i := 0; i < count; i++ {
+		// 计算随机偏移量（以块为单位）
+		maxBlock := int64(fileSize) / int64(blockSize)
+		offset := int64(0)
+		if maxBlock > 1 {
+			offset = time.Now().UnixNano() % maxBlock
+		}
+
+		// 使用 dd 进行随机位置读取
+		cmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d count=1 skip=%d iflag=direct 2>/dev/null",
+			testFile, blockSize, offset)
+		_, err := dc.runSSHCommand(host, cmd)
+		if err == nil {
+			totalBytes += uint64(blockSize)
+		}
+	}
+
+	return totalBytes, nil
 }
 
 // runWriteTest 执行单次写入测试
@@ -1111,46 +1334,62 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 // RunRemote 通过 SSH 连接远程主机并收集硬件信息
 // 参数 host: 远程主机名或 IP 地址
 // 返回：包含远程主机硬件信息的 RemoteHardwareInfo 结构体
+// 注意：此方法不依赖远程主机上的 dbcheckperf 命令，直接通过 SSH 执行底层硬件收集命令
 func (hc *HardwareChecker) RunRemote(host string) *RemoteHardwareInfo {
 	result := &RemoteHardwareInfo{
 		Host: host,
 	}
 
-	// 构建 SSH 命令，在远程主机上执行 dbcheckperf -r H
-	// 使用 SSH 执行远程命令收集硬件信息
-	cmd := exec.Command("ssh", host, "dbcheckperf", "-r", "H")
-	output, err := cmd.Output()
-	if err != nil {
-		result.Error = fmt.Errorf("SSH 连接失败或远程命令执行失败：%v", err)
+	// 测试 SSH 连接是否可用（使用标准 SSH 选项）
+	cmd := exec.Command("ssh",
+		"-o", "ConnectTimeout=5",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		host, "echo", "test")
+	if err := cmd.Run(); err != nil {
+		result.Error = fmt.Errorf("SSH 连接失败：%v", err)
 		return result
 	}
 
-	// 解析输出，提取硬件信息
-	result.HardwareInfo = hc.parseRemoteOutput(string(output), host)
-	if result.HardwareInfo == nil {
-		result.Error = fmt.Errorf("无法解析远程主机硬件信息")
-	}
-
-	return result
-}
-
-// parseRemoteOutput 解析远程主机输出
-// 通过 SSH 执行本地 dbcheckperf -r H 命令，然后解析输出
-func (hc *HardwareChecker) parseRemoteOutput(output string, host string) *HardwareInfo {
-	// 简单方法：直接执行收集命令获取原始数据
-	// 使用 SSH 执行底层硬件收集命令
+	// 直接通过 SSH 执行各个硬件收集命令，不依赖远程 dbcheckperf
 	info := &HardwareInfo{
 		Host: host,
 	}
 
-	// 通过 SSH 执行各个硬件收集命令
+	// 收集 CPU 信息
 	info.CPUInfo = hc.collectRemoteCPUInfo(host)
+
+	// 收集磁盘信息
 	info.DiskInfos = hc.collectRemoteDiskInfo(host)
+
+	// 收集 RAID 信息
 	info.RAIDInfo = hc.collectRemoteRAIDInfo(host)
+
+	// 收集网卡信息
 	info.NICInfos = hc.collectRemoteNICInfo(host)
+
+	// 收集内存信息
 	info.MemoryInfo = hc.collectRemoteMemoryInfo(host)
 
-	return info
+	result.HardwareInfo = info
+	return result
+}
+
+// runSSHCommand 通过 SSH 执行远程命令并返回输出（辅助函数）
+func runSSHCommand(host string, command string) (string, error) {
+	cmd := exec.Command("ssh",
+		"-o", "ConnectTimeout=5",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		host, command)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("SSH 命令执行失败：%v", err)
+	}
+	return string(output), nil
 }
 
 // collectRemoteCPUInfo 通过 SSH 收集远程主机 CPU 信息
@@ -1158,16 +1397,14 @@ func (hc *HardwareChecker) collectRemoteCPUInfo(host string) *CPUInfo {
 	cpuInfo := &CPUInfo{}
 
 	// 使用 SSH 执行 lscpu 命令
-	cmd := exec.Command("ssh", host, "lscpu")
-	output, err := cmd.Output()
+	output, err := runSSHCommand(host, "lscpu")
 	if err == nil {
 		cpuInfo = hc.parseLscpuOutput(string(output))
 	}
 
 	// 如果 lscpu 失败或信息不完整，使用备用方法
 	if cpuInfo.Cores == 0 {
-		cmd = exec.Command("ssh", host, "nproc")
-		output, err = cmd.Output()
+		output, err = runSSHCommand(host, "nproc")
 		if err == nil {
 			cores, _ := strconv.Atoi(strings.TrimSpace(string(output)))
 			if cores > 0 {
@@ -1190,8 +1427,7 @@ func (hc *HardwareChecker) collectRemoteDiskInfo(host string) []*DiskInfo {
 	var diskInfos []*DiskInfo
 
 	// 使用 SSH 执行 lsblk 命令获取磁盘列表
-	cmd := exec.Command("ssh", host, "lsblk", "-nd", "-o", "NAME,MODEL,SERIAL,TYPE,SIZE,ROTA", "--bytes")
-	output, err := cmd.Output()
+	output, err := runSSHCommand(host, "lsblk -nd -o NAME,MODEL,SERIAL,TYPE,SIZE,ROTA --bytes")
 	if err != nil {
 		return diskInfos
 	}
@@ -1261,15 +1497,13 @@ func (hc *HardwareChecker) collectRemoteRAIDInfo(host string) *RAIDConfigInfo {
 	}
 
 	// 使用 SSH 执行 lspci 检测 RAID 卡
-	cmd := exec.Command("ssh", host, "lspci")
-	output, err := cmd.Output()
+	output, err := runSSHCommand(host, "lspci")
 	if err == nil {
 		hc.parseLspciForRAID(string(output), info)
 	}
 
 	// 检查软件 RAID
-	cmd = exec.Command("ssh", host, "cat", "/proc/mdstat")
-	output, err = cmd.Output()
+	output, err = runSSHCommand(host, "cat /proc/mdstat")
 	if err == nil && strings.Contains(string(output), "active") {
 		info.HasRAID = true
 		if info.RAIDModel == "" {
@@ -1286,8 +1520,7 @@ func (hc *HardwareChecker) collectRemoteNICInfo(host string) []*NICInfo {
 	var nicInfos []*NICInfo
 
 	// 使用 SSH 执行 ip 命令获取网卡列表
-	cmd := exec.Command("ssh", host, "ip", "-o", "link", "show")
-	output, err := cmd.Output()
+	output, err := runSSHCommand(host, "ip -o link show")
 	if err != nil {
 		return nicInfos
 	}
@@ -1334,8 +1567,7 @@ func (hc *HardwareChecker) collectRemoteNICInfo(host string) []*NICInfo {
 		}
 
 		// 获取速率
-		cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/speed", name))
-		speedOutput, err := cmd.Output()
+		speedOutput, err := runSSHCommand(host, fmt.Sprintf("cat /sys/class/net/%s/speed", name))
 		if err == nil {
 			speed, _ := strconv.Atoi(strings.TrimSpace(string(speedOutput)))
 			if speed > 0 {
@@ -1344,8 +1576,7 @@ func (hc *HardwareChecker) collectRemoteNICInfo(host string) []*NICInfo {
 		}
 
 		// 获取队列大小
-		cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/tx_queue_len", name))
-		queueOutput, err := cmd.Output()
+		queueOutput, err := runSSHCommand(host, fmt.Sprintf("cat /sys/class/net/%s/tx_queue_len", name))
 		if err == nil {
 			queueSize, _ := strconv.Atoi(strings.TrimSpace(string(queueOutput)))
 			if queueSize > 0 {
@@ -1360,22 +1591,19 @@ func (hc *HardwareChecker) collectRemoteNICInfo(host string) []*NICInfo {
 		if strings.HasPrefix(name, "bond") {
 			nicInfo.IsBond = true
 			// 获取绑定模式
-			cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/bonding/mode", name))
-			modeOutput, err := cmd.Output()
+			modeOutput, err := runSSHCommand(host, fmt.Sprintf("cat /sys/class/net/%s/bonding/mode", name))
 			if err == nil {
 				nicInfo.BondMode = strings.TrimSpace(string(modeOutput))
 			}
 			// 获取从网卡数量
-			cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/bonding/slaves", name))
-			slavesOutput, err := cmd.Output()
+			slavesOutput, err := runSSHCommand(host, fmt.Sprintf("cat /sys/class/net/%s/bonding/slaves", name))
 			if err == nil {
 				nicInfo.BondSlaves = len(strings.Fields(string(slavesOutput)))
 			}
 		}
 
 		// 获取驱动信息
-		cmd = exec.Command("ssh", host, "ethtool", "-i", name)
-		driverOutput, err := cmd.Output()
+		driverOutput, err := runSSHCommand(host, fmt.Sprintf("ethtool -i %s", name))
 		if err == nil {
 			for _, line := range strings.Split(string(driverOutput), "\n") {
 				if strings.HasPrefix(line, "driver:") {
@@ -1403,8 +1631,7 @@ func (hc *HardwareChecker) collectRemoteMemoryInfo(host string) *MemoryInfo {
 	}
 
 	// 使用 SSH 执行 free 命令获取总内存
-	cmd := exec.Command("ssh", host, "free", "-b")
-	output, err := cmd.Output()
+	output, err := runSSHCommand(host, "free -b")
 	if err == nil {
 		lines := strings.Split(string(output), "\n")
 		for _, line := range lines {
@@ -1420,8 +1647,7 @@ func (hc *HardwareChecker) collectRemoteMemoryInfo(host string) *MemoryInfo {
 	}
 
 	// 尝试从 /sys/devices/system/node 获取 NUMA 节点数
-	cmd = exec.Command("ssh", host, "ls", "-d", "/sys/devices/system/node/node*")
-	nodeOutput, err := cmd.Output()
+	nodeOutput, err := runSSHCommand(host, "ls -d /sys/devices/system/node/node*")
 	if err == nil {
 		nodes := strings.Fields(string(nodeOutput))
 		memInfo.NUMANodes = len(nodes)
