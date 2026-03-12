@@ -950,12 +950,149 @@ type NICBondInfo struct {
 	QueueSize int
 }
 
+// HardwareInfo 硬件详细信息
+type HardwareInfo struct {
+	// Host 主机名
+	Host string
+	// CPUInfo CPU 信息
+	CPUInfo *CPUInfo
+	// DiskInfos 磁盘信息列表
+	DiskInfos []*DiskInfo
+	// RAIDInfo RAID 信息
+	RAIDInfo *RAIDConfigInfo
+	// NICInfos 网卡信息列表
+	NICInfos []*NICInfo
+	// MemoryInfo 内存信息
+	MemoryInfo *MemoryInfo
+}
+
+// CPUInfo CPU 详细信息
+type CPUInfo struct {
+	// Model CPU 型号
+	Model string
+	// Cores 核心数
+	Cores int
+	// TurboFreq 睿频 (MHz)，0 表示不支持
+	TurboFreq int
+	// BaseFreq 基准频率 (MHz)
+	BaseFreq int
+	// Sockets CPU 插槽数
+	Sockets int
+	// NUMANodes NUMA 节点数
+	NUMANodes int
+}
+
+// MemoryInfo 内存详细信息
+type MemoryInfo struct {
+	// TotalMemory 总内存 (字节)
+	TotalMemory uint64
+	// MemoryType 内存类型 (DDR3/DDR4/DDR5)
+	MemoryType string
+	// MemorySpeed 内存速度 (MHz)
+	MemorySpeed int
+	// MemorySlots 内存插槽数
+	MemorySlots int
+	// NUMANodes NUMA 节点数
+	NUMANodes int
+}
+
+// DiskInfo 磁盘详细信息
+type DiskInfo struct {
+	// Name 磁盘名称（如 sda, nvme0n1）
+	Name string
+	// Model 磁盘型号
+	Model string
+	// Vendor 磁盘厂家
+	Vendor string
+	// Size 总大小（字节）
+	Size uint64
+	// Type 磁盘类型（HDD/SSD/NVMe）
+	Type string
+	// Rotational 是否旋转磁盘（HDD=true）
+	Rotational bool
+}
+
+// RAIDConfigInfo RAID 配置详细信息
+type RAIDConfigInfo struct {
+	// HasRAID 是否有 RAID
+	HasRAID bool
+	// RAIDModel RAID 卡型号
+	RAIDModel string
+	// CacheSize 缓存大小（字节）
+	CacheSize uint64
+	// StripeSize 条带大小（KB）
+	StripeSize int
+	// RAIDLevel RAID 级别
+	RAIDLevel string
+	// BatteryBackup 是否有电池备份
+	BatteryBackup bool
+}
+
+// NICInfo 网卡详细信息
+type NICInfo struct {
+	// Name 网卡名称
+	Name string
+	// Speed 速率（Mbps）
+	Speed int
+	// IsBond 是否绑定
+	IsBond bool
+	// BondMode 绑定模式（仅当 IsBond=true 时有效）
+	BondMode string
+	// BondSlaves 绑定从网卡数量
+	BondSlaves int
+	// QueueSize 队列大小
+	QueueSize int
+	// MTU MTU 大小
+	MTU int
+	// Driver 网卡驱动
+	Driver string
+	// MACAddress MAC 地址
+	MACAddress string
+}
+
 // SystemChecker 系统信息检查器
 type SystemChecker struct{}
 
 // NewSystemChecker 创建新的系统信息检查器
 func NewSystemChecker() *SystemChecker {
 	return &SystemChecker{}
+}
+
+// HardwareChecker 硬件信息检查器
+type HardwareChecker struct {
+	// Verbose 是否显示详细输出
+	Verbose bool
+}
+
+// NewHardwareChecker 创建新的硬件信息检查器
+func NewHardwareChecker(verbose bool) *HardwareChecker {
+	return &HardwareChecker{
+		Verbose: verbose,
+	}
+}
+
+// Run 执行硬件信息收集
+func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
+	info := &HardwareInfo{
+		Host: getHostname(),
+	}
+
+	// 收集 CPU 信息
+	info.CPUInfo = hc.collectCPUInfo()
+
+	// 收集磁盘信息
+	info.DiskInfos = hc.collectDiskInfo()
+
+	// 收集 RAID 信息
+	info.RAIDInfo = hc.collectRAIDInfo()
+
+	// 收集网卡信息
+	info.NICInfos = hc.collectNICInfo()
+
+	// 收集内存信息
+	info.MemoryInfo = hc.collectMemoryInfo()
+
+	return info, nil
 }
 
 // Run 收集系统信息
@@ -1704,4 +1841,528 @@ func sumSlice(values []float64) float64 {
 		sum += v
 	}
 	return sum
+}
+
+// collectCPUInfo 收集 CPU 信息
+func (hc *HardwareChecker) collectCPUInfo() *CPUInfo {
+	cpuInfo := &CPUInfo{}
+
+	// 使用 lscpu 一次性获取所有 CPU 信息
+	cmd := exec.Command("lscpu")
+	output, err := cmd.Output()
+	if err == nil {
+		cpuInfo = hc.parseLscpuOutput(string(output))
+	}
+
+	// 如果 lscpu 失败或信息不完整，使用备用方法
+	if cpuInfo.Cores == 0 {
+		cpuInfo.Cores = hc.getCPUCoreFallback()
+	}
+	if cpuInfo.Sockets == 0 {
+		cpuInfo.Sockets = 1
+	}
+	if cpuInfo.NUMANodes == 0 {
+		cpuInfo.NUMANodes = 1
+	}
+
+	return cpuInfo
+}
+
+// parseLscpuOutput 解析 lscpu 输出
+func (hc *HardwareChecker) parseLscpuOutput(output string) *CPUInfo {
+	cpuInfo := &CPUInfo{}
+
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, ":") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		switch key {
+		case "Model name":
+			cpuInfo.Model = value
+		case "CPU(s)":
+			cpuInfo.Cores, _ = strconv.Atoi(value)
+		case "Socket(s)":
+			cpuInfo.Sockets, _ = strconv.Atoi(value)
+		case "CPU base MHz":
+			if freq, err := strconv.ParseFloat(value, 64); err == nil {
+				cpuInfo.BaseFreq = int(freq)
+			}
+		case "CPU max MHz":
+			if freq, err := strconv.ParseFloat(value, 64); err == nil {
+				cpuInfo.TurboFreq = int(freq)
+			}
+		case "NUMA node(s)":
+			cpuInfo.NUMANodes, _ = strconv.Atoi(value)
+		}
+	}
+
+	// 如果 Model 为空，尝试从 /proc/cpuinfo 读取
+	if cpuInfo.Model == "" {
+		cpuInfo.Model = hc.getCPUModelFallback()
+	}
+
+	return cpuInfo
+}
+
+// getCPUCoreFallback 获取 CPU 核心数（备用方法）
+func (hc *HardwareChecker) getCPUCoreFallback() int {
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err == nil {
+		count := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "processor") {
+				count++
+			}
+		}
+		if count > 0 {
+			return count
+		}
+	}
+	return 1
+}
+
+// getCPUModelFallback 获取 CPU 型号（备用方法）
+func (hc *HardwareChecker) getCPUModelFallback() string {
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "model name") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					return strings.TrimSpace(parts[1])
+				}
+			}
+		}
+	}
+	return "Unknown"
+}
+
+// collectDiskInfo 收集磁盘信息
+func (hc *HardwareChecker) collectDiskInfo() []*DiskInfo {
+	var diskInfos []*DiskInfo
+
+	// 遍历 /sys/block 获取所有块设备
+	entries, err := os.ReadDir("/sys/block")
+	if err != nil {
+		return diskInfos
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		// 跳过 loop、ram 等设备
+		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") {
+			continue
+		}
+
+		diskInfo := &DiskInfo{
+			Name: name,
+			Type: "Unknown",
+		}
+
+		// 获取磁盘信息
+		hc.collectDiskBasicInfo(name, diskInfo)
+
+		// 只添加有实际大小的磁盘
+		if diskInfo.Size > 0 {
+			diskInfos = append(diskInfos, diskInfo)
+		}
+	}
+
+	return diskInfos
+}
+
+// collectDiskBasicInfo 收集磁盘基本信息
+func (hc *HardwareChecker) collectDiskBasicInfo(name string, diskInfo *DiskInfo) {
+	// 获取磁盘大小
+	sizePath := fmt.Sprintf("/sys/block/%s/size", name)
+	if data, err := os.ReadFile(sizePath); err == nil {
+		sectors, _ := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+		diskInfo.Size = sectors * 512 // 每扇区 512 字节
+	}
+
+	// 获取是否旋转磁盘并确定类型
+	rotPath := fmt.Sprintf("/sys/block/%s/queue/rotational", name)
+	if data, err := os.ReadFile(rotPath); err == nil {
+		diskInfo.Rotational = strings.TrimSpace(string(data)) == "1"
+		if diskInfo.Rotational {
+			diskInfo.Type = "HDD"
+		} else {
+			diskInfo.Type = "SSD"
+		}
+	}
+
+	// 检测 NVMe
+	if strings.HasPrefix(name, "nvme") {
+		diskInfo.Type = "NVMe"
+	}
+
+	// 获取磁盘型号和厂家
+	diskInfo.Model, diskInfo.Vendor = hc.getDiskModel(name)
+}
+
+// getDiskModel 获取磁盘型号和厂家
+func (hc *HardwareChecker) getDiskModel(name string) (string, string) {
+	// 方法 1: 尝试从 /sys/block 读取（最快）
+	modelPath := fmt.Sprintf("/sys/block/%s/device/model", name)
+	if data, err := os.ReadFile(modelPath); err == nil {
+		model := strings.TrimSpace(string(data))
+		if model != "" {
+			return model, hc.extractVendor(model)
+		}
+	}
+
+	// 方法 2: 尝试使用 hdparm
+	if cmd, err := exec.LookPath("hdparm"); err == nil {
+		output, err := exec.Command(cmd, "-I", "/dev/"+name).Output()
+		if err == nil {
+			if model := hc.parseHdparmOutput(string(output)); model != "" {
+				return model, hc.extractVendor(model)
+			}
+		}
+	}
+
+	// 方法 3: 尝试使用 nvme-cli（针对 NVMe 磁盘）
+	if strings.HasPrefix(name, "nvme") {
+		if cmd, err := exec.LookPath("nvme"); err == nil {
+			output, err := exec.Command(cmd, "list").Output()
+			if err == nil {
+				if model := hc.parseNvmeListOutput(string(output), name); model != "" {
+					return model, hc.extractVendor(model)
+				}
+			}
+		}
+	}
+
+	return "Unknown", ""
+}
+
+// parseHdparmOutput 解析 hdparm 输出
+func (hc *HardwareChecker) parseHdparmOutput(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Model Number:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "Model Number:"))
+		}
+	}
+	return ""
+}
+
+// parseNvmeListOutput 解析 nvme list 输出
+func (hc *HardwareChecker) parseNvmeListOutput(output string, diskName string) string {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, diskName) {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				return fields[1]
+			}
+		}
+	}
+	return ""
+}
+
+// extractVendor 从型号中提取厂家
+func (hc *HardwareChecker) extractVendor(model string) string {
+	model = strings.ToUpper(model)
+	if strings.Contains(model, "SAMSUNG") {
+		return "Samsung"
+	}
+	if strings.Contains(model, "INTEL") {
+		return "Intel"
+	}
+	if strings.Contains(model, "WD ") || strings.Contains(model, "WESTERN DIGITAL") {
+		return "Western Digital"
+	}
+	if strings.Contains(model, "SEAGATE") {
+		return "Seagate"
+	}
+	if strings.Contains(model, "TOSHIBA") {
+		return "Toshiba"
+	}
+	if strings.Contains(model, "HITACHI") {
+		return "Hitachi"
+	}
+	if strings.Contains(model, "HGST") {
+		return "HGST"
+	}
+	if strings.Contains(model, "CRUCIAL") {
+		return "Crucial"
+	}
+	if strings.Contains(model, "KINGSTON") {
+		return "Kingston"
+	}
+	return ""
+}
+
+// collectRAIDInfo 收集 RAID 信息
+func (hc *HardwareChecker) collectRAIDInfo() *RAIDConfigInfo {
+	info := &RAIDConfigInfo{}
+
+	// 使用 lspci 检测 RAID 卡
+	cmd := exec.Command("lspci")
+	output, err := cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			lineLower := strings.ToLower(line)
+			if strings.Contains(lineLower, "raid") || strings.Contains(lineLower, "sas controller") {
+				info.HasRAID = true
+				// 提取型号
+				if idx := strings.Index(line, ":"); idx != -1 {
+					info.RAIDModel = strings.TrimSpace(line[idx+1:])
+				}
+				break
+			}
+		}
+	}
+
+	// 使用 megacli 获取详细信息
+	if info.HasRAID {
+		cmd = exec.Command("megacli", "adpallinfo", "-aALL")
+		output, err := cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				if strings.Contains(line, "Product Name") {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						info.RAIDModel = strings.TrimSpace(parts[1])
+					}
+				}
+				if strings.Contains(line, "BBU") {
+					info.BatteryBackup = !strings.Contains(strings.ToUpper(line), "NOT")
+				}
+				if strings.Contains(line, "Strip Size") || strings.Contains(line, "Stripe Size") {
+					parts := strings.Fields(line)
+					for _, part := range parts {
+						if strings.Contains(strings.ToLower(part), "kb") {
+							size, _ := strconv.Atoi(strings.TrimSuffix(strings.ToUpper(part), "KB"))
+							if size > 0 {
+								info.StripeSize = size
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 检测软件 RAID
+	data, err := os.ReadFile("/proc/mdstat")
+	if err == nil && strings.Contains(string(data), "active") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "Linux Software RAID (mdraid)"
+		}
+		info.StripeSize = 512
+	}
+
+	// 默认条带大小
+	if info.StripeSize == 0 {
+		info.StripeSize = 64
+	}
+
+	return info
+}
+
+// collectNICInfo 收集网卡信息
+func (hc *HardwareChecker) collectNICInfo() []*NICInfo {
+	var nicInfos []*NICInfo
+
+	// 遍历 /sys/class/net 获取所有网卡
+	netPath := "/sys/class/net"
+	entries, err := os.ReadDir(netPath)
+	if err != nil {
+		return nicInfos
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		// 跳过 lo 回环接口和虚拟接口
+		if name == "lo" || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") {
+			continue
+		}
+
+		nicInfo := &NICInfo{
+			Name: name,
+			MTU:  1500, // 默认 MTU
+		}
+
+		// 收集网卡信息
+		hc.collectNICBasicInfo(name, nicInfo)
+
+		nicInfos = append(nicInfos, nicInfo)
+	}
+
+	return nicInfos
+}
+
+// collectNICBasicInfo 收集网卡基本信息
+func (hc *HardwareChecker) collectNICBasicInfo(name string, nicInfo *NICInfo) {
+	netPath := "/sys/class/net"
+
+	// 获取 MAC 地址
+	if data, err := os.ReadFile(fmt.Sprintf("%s/%s/address", netPath, name)); err == nil {
+		nicInfo.MACAddress = strings.TrimSpace(string(data))
+	}
+
+	// 获取 MTU
+	if data, err := os.ReadFile(fmt.Sprintf("%s/%s/mtu", netPath, name)); err == nil {
+		nicInfo.MTU, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+
+	// 获取速率
+	if data, err := os.ReadFile(fmt.Sprintf("%s/%s/speed", netPath, name)); err == nil {
+		nicInfo.Speed, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+
+	// 获取队列大小
+	if data, err := os.ReadFile(fmt.Sprintf("%s/%s/tx_queue_len", netPath, name)); err == nil {
+		nicInfo.QueueSize, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	if nicInfo.QueueSize == 0 {
+		nicInfo.QueueSize = 1000 // 默认队列大小
+	}
+
+	// 检测是否为 bond 接口
+	if strings.HasPrefix(name, "bond") {
+		nicInfo.IsBond = true
+		// 获取绑定模式
+		if data, err := os.ReadFile(fmt.Sprintf("%s/%s/bonding/mode", netPath, name)); err == nil {
+			nicInfo.BondMode = strings.TrimSpace(string(data))
+		}
+		// 获取从网卡数量
+		if data, err := os.ReadFile(fmt.Sprintf("%s/%s/bonding/slaves", netPath, name)); err == nil {
+			nicInfo.BondSlaves = len(strings.Fields(string(data)))
+		}
+	}
+
+	// 获取驱动信息
+	nicInfo.Driver = hc.getNICDriver(name)
+}
+
+// getNICDriver 获取网卡驱动
+func (hc *HardwareChecker) getNICDriver(name string) string {
+	// 使用 ethtool
+	cmd := exec.Command("ethtool", "-i", name)
+	output, err := cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "driver:") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "driver:"))
+			}
+		}
+	}
+
+	// 尝试从 /sys/class/net 读取
+	driverPath := fmt.Sprintf("/sys/class/net/%s/device/driver", name)
+	link, err := os.Readlink(driverPath)
+	if err == nil {
+		// 从链接中提取驱动名
+		parts := strings.Split(link, "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+
+	return "Unknown"
+}
+
+// collectMemoryInfo 收集内存信息
+func (hc *HardwareChecker) collectMemoryInfo() *MemoryInfo {
+	memInfo := &MemoryInfo{
+		MemoryType:  "Unknown",
+		MemorySpeed: 0,
+		MemorySlots: 0,
+	}
+
+	// 获取总内存
+	ram, err := utils.GetTotalRAM()
+	if err == nil {
+		memInfo.TotalMemory = ram
+	}
+
+	// 使用 dmidecode 获取内存详细信息
+	if cmd, err := exec.LookPath("dmidecode"); err == nil {
+		output, err := exec.Command(cmd, "-t", "memory", "-q").Output()
+		if err == nil {
+			hc.parseDmidecodeMemoryOutput(string(output), memInfo)
+		}
+	}
+
+	// 尝试从 /sys/devices/system/edac/mc 获取内存信息
+	hc.collectMemoryFromSysfs(memInfo)
+
+	// 如果没有检测到内存插槽数，使用 NUMA 节点数估算
+	if memInfo.MemorySlots == 0 {
+		memInfo.MemorySlots = memInfo.NUMANodes
+		if memInfo.MemorySlots == 0 {
+			memInfo.MemorySlots = 1
+		}
+	}
+
+	return memInfo
+}
+
+// parseDmidecodeMemoryOutput 解析 dmidecode 内存输出
+func (hc *HardwareChecker) parseDmidecodeMemoryOutput(output string, memInfo *MemoryInfo) {
+	lines := strings.Split(output, "\n")
+	slotCount := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Type:") {
+			memType := strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
+			if memType != "" && memType != "Unknown" {
+				memInfo.MemoryType = memType
+			}
+		}
+		if strings.HasPrefix(line, "Speed:") {
+			if speed, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Speed:"))); err == nil {
+				if speed > memInfo.MemorySpeed {
+					memInfo.MemorySpeed = speed
+				}
+			}
+		}
+		if strings.Contains(line, "Memory Device") {
+			slotCount++
+		}
+	}
+	memInfo.MemorySlots = slotCount
+}
+
+// collectMemoryFromSysfs 从 sysfs 收集内存信息
+func (hc *HardwareChecker) collectMemoryFromSysfs(memInfo *MemoryInfo) {
+	// 尝试从 /sys/devices/system/node 获取 NUMA 节点数
+	entries, err := os.ReadDir("/sys/devices/system/node")
+	if err == nil {
+		count := 0
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "node") {
+				count++
+			}
+		}
+		if count > 0 {
+			memInfo.NUMANodes = count
+		}
+	}
+
+	// 尝试从 /sys/firmware/dmi/entries 读取内存类型
+	if data, err := os.ReadFile("/sys/firmware/dmi/entries/17-0"); err == nil {
+		content := string(data)
+		if strings.Contains(content, "DDR4") {
+			memInfo.MemoryType = "DDR4"
+		} else if strings.Contains(content, "DDR3") {
+			memInfo.MemoryType = "DDR3"
+		} else if strings.Contains(content, "DDR5") {
+			memInfo.MemoryType = "DDR5"
+		}
+	}
 }

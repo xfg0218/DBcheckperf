@@ -21,6 +21,8 @@ const (
 	TestNetworkParallel TestType = "N"
 	// TestNetworkMatrix 网络全矩阵测试
 	TestNetworkMatrix TestType = "M"
+	// TestHardware 硬件信息收集
+	TestHardware TestType = "H"
 )
 
 // Config 配置结构体，包含所有运行参数
@@ -72,6 +74,11 @@ func DefaultConfig() *Config {
 
 // Validate 验证配置是否有效
 func (c *Config) Validate() error {
+	// 硬件信息收集模式不需要测试目录和主机
+	if hasTestType(c.TestTypes, TestHardware) && len(c.TestTypes) == 1 {
+		return nil
+	}
+
 	if len(c.Hosts) == 0 && c.HostFile == "" {
 		return ErrNoHostsSpecified
 	}
@@ -79,6 +86,16 @@ func (c *Config) Validate() error {
 		return ErrNoTestDirsSpecified
 	}
 	return nil
+}
+
+// hasTestType 检查是否包含指定的测试类型
+func hasTestType(types []TestType, target TestType) bool {
+	for _, t := range types {
+		if t == target {
+			return true
+		}
+	}
+	return false
 }
 
 // 错误定义

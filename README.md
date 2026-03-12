@@ -10,6 +10,7 @@ dbcheckperf is a database performance check tool written in Go, based on the Gre
 - **Random I/O Testing**: Supports 4K random read/write performance testing using `dd` with `seek/skip` parameters for random position access
 - **Memory Bandwidth Testing**: Uses STREAM benchmark method (Go implementation), actually executes Copy/Scale/Add/Triad memory operations
 - **Network Performance Testing**: Supports iperf3/netperf/curl/TCP stream multiple test methods, automatically selects the best tool
+- **Hardware Information Collection**: Collects CPU model/cores/turbo frequency, disk model/vendor/size, RAID configuration, network card details
 - **System Information Collection**: Automatically collects CPU cores, memory size, network card speed, etc.
 - **Hardware Detection**: Detects VM/physical machine, RAID card model, stripe size, network bonding, queue size, etc.
 - **Multi-Architecture Support**: Compatible with x86/x86_64 (Intel/AMD) and ARM/ARM64 architecture servers
@@ -60,7 +61,7 @@ dbcheckperf -d <temp_dir>
 | `-D` | Display detailed results per host | false |
 | `-f <hostfile>` | File containing host list | - |
 | `-h <host>` | Hostname (can be specified multiple times) | - |
-| `-r <test_type>` | Test type: d=disk, s=memory stream, n/N/M=network | dsn |
+| `-r <test_type>` | Test type: d=disk, s=memory stream, n/N/M=network, H=hardware | dsn |
 | `-S <file_size>` | Disk I/O test file size | 2xRAM |
 | `-v` | Verbose mode | false |
 | `-V` | Very verbose mode | false |
@@ -81,6 +82,7 @@ dbcheckperf -d <temp_dir>
 | `n` | Network Serial | Test network host by host |
 | `N` | Network Parallel | Test all hosts simultaneously (requires even number of hosts) |
 | `M` | Network Full Matrix | Each host tests with all other hosts |
+| `H` | Hardware Info | Collect and display hardware configuration information |
 
 ## Examples
 
@@ -126,6 +128,18 @@ dbcheckperf -f hosts.txt -r M -d /tmp --duration 30s
 dbcheckperf -d /tmp -r ds -v
 ```
 
+### Example 8: Collect Hardware Information
+
+```bash
+dbcheckperf -r H -v
+```
+
+This will display:
+- **CPU Information**: Model, cores, sockets, base frequency, turbo frequency, NUMA nodes
+- **Disk Information**: Device name, model, vendor, type (HDD/SSD/NVMe), size, rotational
+- **RAID Information**: RAID card model, cache size, stripe size, RAID level, battery backup
+- **Network Information**: Device name, speed, MTU, queue size, bond status, bond mode, driver, MAC address
+
 ## Output Format
 
 ### System Information Table
@@ -139,6 +153,42 @@ Hostname            Virtualization  CPU Model                    CPU Cores   Mem
 ----------------------------------------------------------------------------------------------------------------------------------
 server1             Physical        Intel Xeon E5-2680           16          64.00 GB       CentOS 7.9        3.10.0-1160           10000 Mbps
 server2             KVM             AMD EPYC 7K62                32          128.00 GB      Ubuntu 20.04      5.4.0-42              25000 Mbps
+```
+
+### Hardware Information Table
+
+```
+====================
+==  Hardware Information
+====================
+
+--- CPU Information ---
+
+Hostname            CPU Model                            Cores      Sockets    Base Freq    Turbo Freq   NUMA Nodes
+--------------------------------------------------------------------------------------------------------------
+server1             Intel Xeon E5-2680 v3 @ 2.50GHz      12         1          2500 MHz     3300 MHz     1
+
+--- Disk Information ---
+
+Device       Model                               Vendor          Type         Size         Rotational
+----------------------------------------------------------------------------------------------------
+sda          Samsung SSD 860 PRO 1TB             Samsung        SSD          1.00 TB      No
+sdb          WDC WD4003FFBX-68LU              Western Digital  HDD          4.00 TB      Yes
+nvme0n1      INTEL SSDPE2KE016T8                 Intel          NVMe         1.60 TB      No
+
+--- RAID Information ---
+
+Status         RAID Model                                 Cache Size        Stripe Size    RAID Level        Battery Backup
+-------------------------------------------------------------------------------------------------------------------------
+Detected       LSI MegaRAID SAS 3508                      2.00 GB           256 KB         RAID10            Supported
+
+--- Network Information ---
+
+Device       Speed            MTU        Queue      Bond       Bond Mode       Driver          MAC Address
+---------------------------------------------------------------------------------------------------------------
+eth0         10000 Mbps       1500       1024       No         -               ixgbe           00:1a:2b:3c:4d:5e
+eth1         10000 Mbps       1500       1024       No         -               ixgbe           00:1a:2b:3c:4d:5f
+bond0        20000 Mbps       1500       1024       Yes        802.3ad         bonding         00:1a:2b:3c:4d:60
 ```
 
 ### Detailed Hardware Information Table

@@ -85,6 +85,41 @@ dbcheckperf/
   - x86/x86_64: Intel/AMD 服务器 CPU
   - ARM/ARM64: Qualcomm/Ampere/Apple Silicon 等
 
+### 5. 硬件信息收集 (`-r H`)
+- **CPU 信息**:
+  - CPU 型号
+  - CPU 核心数
+  - CPU 插槽数
+  - 基准频率 (MHz)
+  - 睿频 (MHz)
+  - NUMA 节点数
+- **磁盘信息**:
+  - 设备名称 (如 sda, nvme0n1)
+  - 磁盘型号
+  - 磁盘厂家 (Samsung, Intel, Western Digital 等)
+  - 磁盘类型 (HDD/SSD/NVMe)
+  - 磁盘总大小
+  - 是否旋转磁盘
+- **RAID 信息**:
+  - RAID 卡型号
+  - RAID 缓存大小
+  - 条带大小 (KB)
+  - RAID 级别
+  - 电池备份状态
+  - 支持 megacli/storcli 工具检测
+  - 支持软件 RAID (mdraid) 检测
+- **网卡信息**:
+  - 网卡名称
+  - 网卡速率 (Mbps)
+  - MTU 大小
+  - 队列大小
+  - 是否绑定 (bond)
+  - 绑定模式
+  - 绑定从网卡数量
+  - 网卡驱动
+  - MAC 地址
+- **表格化输出**: 使用整齐的表格格式展示所有硬件信息
+
 ## 构建和运行
 
 ```bash
@@ -105,7 +140,7 @@ go build -o dbcheckperf ./cmd/main.go
 | `-d <目录>` | 测试目录（可多次指定） | 必需 |
 | `-f <主机文件>` | 主机列表文件 | - |
 | `-h <主机名>` | 主机名（可多次指定） | - |
-| `-r <类型>` | 测试类型 (d/s/n/N/M) | dsn |
+| `-r <类型>` | 测试类型 (d/s/n/N/M/H) | dsn |
 | `-B <KB>` | 磁盘块大小 | 32 |
 | `-S <大小>` | 磁盘测试文件大小 | 2xRAM |
 | `-D` | 显示每台主机详情 | false |
@@ -113,6 +148,8 @@ go build -o dbcheckperf ./cmd/main.go
 | `--duration` | 网络测试时长 | 15s |
 | `--random` | 测试随机读写性能 | false |
 | `--random-bs <KB>` | 随机读写块大小 | 4 |
+| `--version` | 显示版本号 | - |
+| `-?` | 显示帮助信息 | - |
 
 ## 输出格式
 

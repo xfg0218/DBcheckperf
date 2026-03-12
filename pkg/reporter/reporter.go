@@ -550,3 +550,197 @@ func (r *Reporter) PrintVerbose(format string, args ...interface{}) {
 		fmt.Printf(format, args...)
 	}
 }
+
+// PrintHardwareResults 打印硬件信息表格
+func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
+	fmt.Println()
+	fmt.Println("====================")
+	fmt.Println("==  硬件信息")
+	fmt.Println("====================")
+	fmt.Println()
+
+	// CPU 信息表格
+	fmt.Println("--- CPU 信息 ---")
+	fmt.Println()
+	cpuHeader := fmt.Sprintf("%-15s %-40s %-8s %-8s %-12s %-12s %-10s",
+		"主机名", "CPU 型号", "核心数", "插槽数", "基准频率", "睿频", "NUMA 节点")
+	fmt.Println(cpuHeader)
+	fmt.Println(strings.Repeat("-", 115))
+
+	cpuModel := info.CPUInfo.Model
+	if len(cpuModel) > 38 {
+		cpuModel = cpuModel[:35] + "..."
+	}
+	baseFreqStr := "-"
+	if info.CPUInfo.BaseFreq > 0 {
+		baseFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.BaseFreq)
+	}
+	turboFreqStr := "-"
+	if info.CPUInfo.TurboFreq > 0 {
+		turboFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.TurboFreq)
+	}
+	cpuRow := fmt.Sprintf("%-15s %-40s %-8d %-8d %-12s %-12s %-10d",
+		info.Host,
+		cpuModel,
+		info.CPUInfo.Cores,
+		info.CPUInfo.Sockets,
+		baseFreqStr,
+		turboFreqStr,
+		info.CPUInfo.NUMANodes)
+	fmt.Println(cpuRow)
+	fmt.Println()
+
+	// 内存信息表格
+	fmt.Println("--- 内存信息 ---")
+	fmt.Println()
+	memHeader := fmt.Sprintf("%-15s %-15s %-15s %-12s %-12s",
+		"主机名", "总内存", "内存类型", "内存速度", "插槽数")
+	fmt.Println(memHeader)
+	fmt.Println(strings.Repeat("-", 75))
+
+	memType := info.MemoryInfo.MemoryType
+	if memType == "" || memType == "Unknown" {
+		memType = "-"
+	}
+	memSpeedStr := "-"
+	if info.MemoryInfo.MemorySpeed > 0 {
+		memSpeedStr = fmt.Sprintf("%d MHz", info.MemoryInfo.MemorySpeed)
+	}
+	memRow := fmt.Sprintf("%-15s %-15s %-15s %-12s %-12d",
+		info.Host,
+		utils.FormatBytes(info.MemoryInfo.TotalMemory),
+		memType,
+		memSpeedStr,
+		info.MemoryInfo.MemorySlots)
+	fmt.Println(memRow)
+	fmt.Println()
+
+	// 磁盘信息表格
+	fmt.Println("--- 磁盘信息 ---")
+	fmt.Println()
+	diskHeader := fmt.Sprintf("%-10s %-30s %-15s %-10s %-12s %-8s",
+		"设备名", "型号", "厂家", "类型", "大小", "旋转")
+	fmt.Println(diskHeader)
+	fmt.Println(strings.Repeat("-", 95))
+
+	if len(info.DiskInfos) == 0 {
+		fmt.Println("未检测到物理磁盘")
+	} else {
+		for _, disk := range info.DiskInfos {
+			model := disk.Model
+			if len(model) > 28 {
+				model = model[:25] + "..."
+			}
+			vendor := disk.Vendor
+			if vendor == "" {
+				vendor = "-"
+			}
+			rotational := "否"
+			if disk.Rotational {
+				rotational = "是"
+			}
+			diskRow := fmt.Sprintf("%-10s %-30s %-15s %-10s %-12s %-8s",
+				disk.Name,
+				model,
+				vendor,
+				disk.Type,
+				utils.FormatBytes(disk.Size),
+				rotational)
+			fmt.Println(diskRow)
+		}
+	}
+	fmt.Println()
+
+	// RAID 信息表格
+	fmt.Println("--- RAID 信息 ---")
+	fmt.Println()
+	raidHeader := fmt.Sprintf("%-10s %-35s %-12s %-12s %-12s %-12s",
+		"状态", "RAID 卡型号", "缓存大小", "条带大小", "RAID 级别", "电池备份")
+	fmt.Println(raidHeader)
+	fmt.Println(strings.Repeat("-", 105))
+
+	raidStatus := "未检测到"
+	raidModel := "-"
+	raidCache := "-"
+	raidStripe := fmt.Sprintf("%d KB", info.RAIDInfo.StripeSize)
+	raidLevel := "-"
+	batteryBackup := "-"
+
+	if info.RAIDInfo.HasRAID {
+		raidStatus = "已检测"
+		if info.RAIDInfo.RAIDModel != "" {
+			raidModel = info.RAIDInfo.RAIDModel
+			if len(raidModel) > 33 {
+				raidModel = raidModel[:30] + "..."
+			}
+		}
+		if info.RAIDInfo.CacheSize > 0 {
+			raidCache = utils.FormatBytes(info.RAIDInfo.CacheSize)
+		}
+		if info.RAIDInfo.RAIDLevel != "" {
+			raidLevel = info.RAIDInfo.RAIDLevel
+		}
+		if info.RAIDInfo.BatteryBackup {
+			batteryBackup = "支持"
+		} else {
+			batteryBackup = "不支持"
+		}
+	}
+
+	raidRow := fmt.Sprintf("%-10s %-35s %-12s %-12s %-12s %-12s",
+		raidStatus,
+		raidModel,
+		raidCache,
+		raidStripe,
+		raidLevel,
+		batteryBackup)
+	fmt.Println(raidRow)
+	fmt.Println()
+
+	// 网卡信息表格
+	fmt.Println("--- 网卡信息 ---")
+	fmt.Println()
+	nicHeader := fmt.Sprintf("%-10s %-12s %-8s %-8s %-8s %-10s %-12s %-20s",
+		"设备名", "速率", "MTU", "队列", "绑定", "绑定模式", "驱动", "MAC 地址")
+	fmt.Println(nicHeader)
+	fmt.Println(strings.Repeat("-", 100))
+
+	if len(info.NICInfos) == 0 {
+		fmt.Println("未检测到网卡")
+	} else {
+		for _, nic := range info.NICInfos {
+			speedStr := fmt.Sprintf("%d Mbps", nic.Speed)
+			if nic.Speed <= 0 {
+				speedStr = "未知"
+			}
+			bondStatus := "否"
+			bondMode := "-"
+			if nic.IsBond {
+				bondStatus = "是"
+				bondMode = nic.BondMode
+				if len(bondMode) > 8 {
+					bondMode = bondMode[:5] + "..."
+				}
+			}
+			driver := nic.Driver
+			if len(driver) > 10 {
+				driver = driver[:7] + "..."
+			}
+			macAddr := nic.MACAddress
+			if len(macAddr) > 18 {
+				macAddr = macAddr[:15] + "..."
+			}
+			nicRow := fmt.Sprintf("%-10s %-12s %-8d %-8d %-8s %-10s %-12s %-20s",
+				nic.Name,
+				speedStr,
+				nic.MTU,
+				nic.QueueSize,
+				bondStatus,
+				bondMode,
+				driver,
+				macAddr)
+			fmt.Println(nicRow)
+		}
+	}
+	fmt.Println()
+}

@@ -52,6 +52,12 @@ func main() {
 		fmt.Println()
 	}
 
+	// 检查是否仅运行硬件信息收集
+	if hasTestType(cfg.TestTypes, config.TestHardware) && len(cfg.TestTypes) == 1 {
+		runHardwareMode(cfg, rep)
+		os.Exit(0)
+	}
+
 	// 收集系统信息
 	rep.PrintProgress("正在收集系统信息...")
 	systemChecker := checker.NewSystemChecker()
@@ -286,6 +292,8 @@ func parseTestTypes(s string) []config.TestType {
 			types = append(types, config.TestNetworkParallel)
 		case 'M':
 			types = append(types, config.TestNetworkMatrix)
+		case 'H':
+			types = append(types, config.TestHardware)
 		}
 	}
 
@@ -346,13 +354,15 @@ func printUsage() {
        {-f <主机文件> | -h <主机名> [-h <主机名> ...]}
        [-r n|N|M [--duration <时间>]] [-D] [-v|-V] [--buffer-size <KB>]
 
+  dbcheckperf -r H  收集硬件信息
+
 选项:
   -B <块大小>         磁盘 I/O 测试块大小 (KB)，默认 32KB，最大 1MB
   -d <目录>           测试目录（可多次指定）
   -D                  显示每台主机的详细结果
   -f <主机文件>       包含主机列表的文件（每行一个主机）
   -h <主机名>         主机名（可多次指定）
-  -r <测试类型>       测试类型：d=磁盘，s=内存流，n/N/M=网络 (串行/并行/全矩阵)，默认 dsn
+  -r <测试类型>       测试类型：d=磁盘，s=内存流，n/N/M=网络 (串行/并行/全矩阵)，H=硬件信息，默认 dsn
   -S <文件大小>       磁盘 I/O 测试文件大小 (KB/MB/GB)，默认 2 倍 RAM
   -v                  详细模式
   -V                  非常详细模式
@@ -380,6 +390,22 @@ func printUsage() {
   # 测试随机读写性能
   dbcheckperf -h localhost -d /tmp -r d --random -v
 
-  # 运行网络测试
-  dbcheckperf -f hosts.txt -r N -d /tmp`)
+  # 收集硬件信息
+  dbcheckperf -r H -v`)
+}
+
+// runHardwareMode 运行硬件信息收集模式
+func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
+	rep.PrintProgress("正在收集硬件信息...")
+
+	hardwareChecker := checker.NewHardwareChecker(cfg.Verbose)
+	hardwareInfo, err := hardwareChecker.Run()
+	if err != nil {
+		rep.PrintError(fmt.Errorf("硬件信息收集失败：%v", err))
+		return
+	}
+
+	if hardwareInfo != nil {
+		rep.PrintHardwareResults(hardwareInfo)
+	}
 }
