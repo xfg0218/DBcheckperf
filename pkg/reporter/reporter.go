@@ -551,145 +551,174 @@ func (r *Reporter) PrintVerbose(format string, args ...interface{}) {
 	}
 }
 
-// PrintHardwareResults 打印硬件信息表格（竖行展示）
-func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
+// PrintHardwareResults 打印硬件信息表格（竖行展示，支持多主机）
+func (r *Reporter) PrintHardwareResults(infos []*checker.RemoteHardwareInfo) {
 	fmt.Println()
 	fmt.Println("====================")
 	fmt.Println("==  硬件信息报告")
 	fmt.Println("====================")
 	fmt.Println()
 
-	// CPU 信息（竖行展示）
-	fmt.Println("--- CPU 信息 ---")
-	fmt.Println()
-	cpuModel := info.CPUInfo.Model
-	baseFreqStr := "-"
-	if info.CPUInfo.BaseFreq > 0 {
-		baseFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.BaseFreq)
-	}
-	turboFreqStr := "-"
-	if info.CPUInfo.TurboFreq > 0 {
-		turboFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.TurboFreq)
-	}
-	fmt.Printf("  主机名：     %s\n", info.Host)
-	fmt.Printf("  CPU 型号：    %s\n", cpuModel)
-	fmt.Printf("  CPU 核心数：   %d\n", info.CPUInfo.Cores)
-	fmt.Printf("  CPU 插槽数：   %d\n", info.CPUInfo.Sockets)
-	fmt.Printf("  基准频率：   %s\n", baseFreqStr)
-	fmt.Printf("  睿频：       %s\n", turboFreqStr)
-	fmt.Println()
-
-	// 内存信息（竖行展示）
-	fmt.Println("--- 内存信息 ---")
-	fmt.Println()
-	memType := info.MemoryInfo.MemoryType
-	if memType == "" || memType == "Unknown" {
-		memType = "-"
-	}
-	memSpeedStr := "-"
-	if info.MemoryInfo.MemorySpeed > 0 {
-		memSpeedStr = fmt.Sprintf("%d MHz", info.MemoryInfo.MemorySpeed)
-	}
-	fmt.Printf("  主机名：     %s\n", info.Host)
-	fmt.Printf("  总内存：     %s\n", utils.FormatBytes(info.MemoryInfo.TotalMemory))
-	fmt.Printf("  内存类型：   %s\n", memType)
-	fmt.Printf("  内存速度：   %s\n", memSpeedStr)
-	fmt.Printf("  插槽数：     %d\n", info.MemoryInfo.MemorySlots)
-	fmt.Println()
-
-	// 磁盘信息（竖行展示）
-	fmt.Println("--- 磁盘信息 ---")
-	fmt.Println()
-	if len(info.DiskInfos) == 0 {
-		fmt.Println("  未检测到物理磁盘")
-	} else {
-		for i, disk := range info.DiskInfos {
-			if i > 0 {
-				fmt.Println()
-			}
-			vendor := disk.Vendor
-			if vendor == "" {
-				vendor = "-"
-			}
-			rotational := "否"
-			if disk.Rotational {
-				rotational = "是"
-			}
-			fmt.Printf("  设备名：   %s\n", disk.Name)
-			fmt.Printf("  型号：     %s\n", disk.Model)
-			fmt.Printf("  厂家：     %s\n", vendor)
-			fmt.Printf("  类型：     %s\n", disk.Type)
-			fmt.Printf("  大小：     %s\n", utils.FormatBytes(disk.Size))
-			fmt.Printf("  旋转磁盘： %s\n", rotational)
+	// 对每台主机显示硬件信息
+	for i, remoteInfo := range infos {
+		// 显示分隔线（第一台主机前不显示）
+		if i > 0 {
+			fmt.Println(strings.Repeat("-", 60))
+			fmt.Println()
 		}
-	}
-	fmt.Println()
 
-	// RAID 信息（竖行展示）
-	fmt.Println("--- RAID 信息 ---")
-	fmt.Println()
-	raidStatus := "未检测到"
-	raidModel := "-"
-	raidCache := "-"
-	raidStripe := fmt.Sprintf("%d KB", info.RAIDInfo.StripeSize)
-	raidLevel := "-"
-	batteryBackup := "-"
+		// 显示错误信息（如果有）
+		if remoteInfo.Error != nil {
+			fmt.Printf("主机：%s\n", remoteInfo.Host)
+			fmt.Printf("错误：%v\n", remoteInfo.Error)
+			fmt.Println()
+			continue
+		}
 
-	if info.RAIDInfo.HasRAID {
-		raidStatus = "已检测"
-		if info.RAIDInfo.RAIDModel != "" {
-			raidModel = info.RAIDInfo.RAIDModel
+		info := remoteInfo.HardwareInfo
+		if info == nil {
+			fmt.Printf("主机：%s\n", remoteInfo.Host)
+			fmt.Println("错误：无硬件信息")
+			fmt.Println()
+			continue
 		}
-		if info.RAIDInfo.CacheSize > 0 {
-			raidCache = utils.FormatBytes(info.RAIDInfo.CacheSize)
+
+		// 显示主机名（多主机模式下）
+		if len(infos) > 1 {
+			fmt.Printf("主机：%s\n", remoteInfo.Host)
+			fmt.Println()
 		}
-		if info.RAIDInfo.RAIDLevel != "" {
-			raidLevel = info.RAIDInfo.RAIDLevel
+
+		// CPU 信息（竖行展示）
+		fmt.Println("--- CPU 信息 ---")
+		fmt.Println()
+		cpuModel := info.CPUInfo.Model
+		baseFreqStr := "-"
+		if info.CPUInfo.BaseFreq > 0 {
+			baseFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.BaseFreq)
 		}
-		if info.RAIDInfo.BatteryBackup {
-			batteryBackup = "支持"
+		turboFreqStr := "-"
+		if info.CPUInfo.TurboFreq > 0 {
+			turboFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.TurboFreq)
+		}
+		fmt.Printf("  CPU 型号：    %s\n", cpuModel)
+		fmt.Printf("  CPU 核心数：   %d\n", info.CPUInfo.Cores)
+		fmt.Printf("  CPU 插槽数：   %d\n", info.CPUInfo.Sockets)
+		fmt.Printf("  基准频率：   %s\n", baseFreqStr)
+		fmt.Printf("  睿频：       %s\n", turboFreqStr)
+		fmt.Println()
+
+		// 内存信息（竖行展示）
+		fmt.Println("--- 内存信息 ---")
+		fmt.Println()
+		memType := info.MemoryInfo.MemoryType
+		if memType == "" || memType == "Unknown" {
+			memType = "-"
+		}
+		memSpeedStr := "-"
+		if info.MemoryInfo.MemorySpeed > 0 {
+			memSpeedStr = fmt.Sprintf("%d MHz", info.MemoryInfo.MemorySpeed)
+		}
+		fmt.Printf("  总内存：     %s\n", utils.FormatBytes(info.MemoryInfo.TotalMemory))
+		fmt.Printf("  内存类型：   %s\n", memType)
+		fmt.Printf("  内存速度：   %s\n", memSpeedStr)
+		fmt.Printf("  插槽数：     %d\n", info.MemoryInfo.MemorySlots)
+		fmt.Println()
+
+		// 磁盘信息（竖行展示）
+		fmt.Println("--- 磁盘信息 ---")
+		fmt.Println()
+		if len(info.DiskInfos) == 0 {
+			fmt.Println("  未检测到物理磁盘")
 		} else {
-			batteryBackup = "不支持"
+			for j, disk := range info.DiskInfos {
+				if j > 0 {
+					fmt.Println()
+				}
+				vendor := disk.Vendor
+				if vendor == "" {
+					vendor = "-"
+				}
+				rotational := "否"
+				if disk.Rotational {
+					rotational = "是"
+				}
+				fmt.Printf("  设备名：   %s\n", disk.Name)
+				fmt.Printf("  型号：     %s\n", disk.Model)
+				fmt.Printf("  厂家：     %s\n", vendor)
+				fmt.Printf("  类型：     %s\n", disk.Type)
+				fmt.Printf("  大小：     %s\n", utils.FormatBytes(disk.Size))
+				fmt.Printf("  旋转磁盘： %s\n", rotational)
+			}
 		}
-	}
+		fmt.Println()
 
-	fmt.Printf("  状态：       %s\n", raidStatus)
-	fmt.Printf("  RAID 型号：   %s\n", raidModel)
-	fmt.Printf("  缓存大小：   %s\n", raidCache)
-	fmt.Printf("  条带大小：   %s\n", raidStripe)
-	fmt.Printf("  RAID 级别：   %s\n", raidLevel)
-	fmt.Printf("  电池备份：   %s\n", batteryBackup)
-	fmt.Println()
+		// RAID 信息（竖行展示）
+		fmt.Println("--- RAID 信息 ---")
+		fmt.Println()
+		raidStatus := "未检测到"
+		raidModel := "-"
+		raidCache := "-"
+		raidStripe := fmt.Sprintf("%d KB", info.RAIDInfo.StripeSize)
+		raidLevel := "-"
+		batteryBackup := "-"
 
-	// 网卡信息（竖行展示）
-	fmt.Println("--- 网卡信息 ---")
-	fmt.Println()
-	if len(info.NICInfos) == 0 {
-		fmt.Println("  未检测到网卡")
-	} else {
-		for i, nic := range info.NICInfos {
-			if i > 0 {
-				fmt.Println()
+		if info.RAIDInfo.HasRAID {
+			raidStatus = "已检测"
+			if info.RAIDInfo.RAIDModel != "" {
+				raidModel = info.RAIDInfo.RAIDModel
 			}
-			speedStr := fmt.Sprintf("%d Mbps", nic.Speed)
-			if nic.Speed <= 0 {
-				speedStr = "未知"
+			if info.RAIDInfo.CacheSize > 0 {
+				raidCache = utils.FormatBytes(info.RAIDInfo.CacheSize)
 			}
-			bondStatus := "否"
-			bondMode := "-"
-			if nic.IsBond {
-				bondStatus = "是"
-				bondMode = nic.BondMode
+			if info.RAIDInfo.RAIDLevel != "" {
+				raidLevel = info.RAIDInfo.RAIDLevel
 			}
-			fmt.Printf("  设备名：   %s\n", nic.Name)
-			fmt.Printf("  速率：     %s\n", speedStr)
-			fmt.Printf("  MTU:       %d\n", nic.MTU)
-			fmt.Printf("  队列大小： %d\n", nic.QueueSize)
-			fmt.Printf("  绑定：     %s\n", bondStatus)
-			fmt.Printf("  绑定模式： %s\n", bondMode)
-			fmt.Printf("  驱动：     %s\n", nic.Driver)
-			fmt.Printf("  MAC 地址：  %s\n", nic.MACAddress)
+			if info.RAIDInfo.BatteryBackup {
+				batteryBackup = "支持"
+			} else {
+				batteryBackup = "不支持"
+			}
 		}
+
+		fmt.Printf("  状态：       %s\n", raidStatus)
+		fmt.Printf("  RAID 型号：   %s\n", raidModel)
+		fmt.Printf("  缓存大小：   %s\n", raidCache)
+		fmt.Printf("  条带大小：   %s\n", raidStripe)
+		fmt.Printf("  RAID 级别：   %s\n", raidLevel)
+		fmt.Printf("  电池备份：   %s\n", batteryBackup)
+		fmt.Println()
+
+		// 网卡信息（竖行展示）
+		fmt.Println("--- 网卡信息 ---")
+		fmt.Println()
+		if len(info.NICInfos) == 0 {
+			fmt.Println("  未检测到网卡")
+		} else {
+			for j, nic := range info.NICInfos {
+				if j > 0 {
+					fmt.Println()
+				}
+				speedStr := fmt.Sprintf("%d Mbps", nic.Speed)
+				if nic.Speed <= 0 {
+					speedStr = "未知"
+				}
+				bondStatus := "否"
+				bondMode := "-"
+				if nic.IsBond {
+					bondStatus = "是"
+					bondMode = nic.BondMode
+				}
+				fmt.Printf("  设备名：   %s\n", nic.Name)
+				fmt.Printf("  速率：     %s\n", speedStr)
+				fmt.Printf("  MTU:       %d\n", nic.MTU)
+				fmt.Printf("  队列大小： %d\n", nic.QueueSize)
+				fmt.Printf("  绑定：     %s\n", bondStatus)
+				fmt.Printf("  绑定模式： %s\n", bondMode)
+				fmt.Printf("  驱动：     %s\n", nic.Driver)
+				fmt.Printf("  MAC 地址：  %s\n", nic.MACAddress)
+			}
+		}
+		fmt.Println()
 	}
-	fmt.Println()
 }

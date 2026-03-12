@@ -399,13 +399,63 @@ func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
 	rep.PrintProgress("正在收集硬件信息...")
 
 	hardwareChecker := checker.NewHardwareChecker(cfg.Verbose)
-	hardwareInfo, err := hardwareChecker.Run()
-	if err != nil {
-		rep.PrintError(fmt.Errorf("硬件信息收集失败：%v", err))
+
+	// 如果没有指定主机，仅收集本地硬件信息
+	if len(cfg.Hosts) == 0 {
+		hardwareInfo, err := hardwareChecker.Run()
+		if err != nil {
+			rep.PrintError(fmt.Errorf("硬件信息收集失败：%v", err))
+			return
+		}
+		if hardwareInfo != nil {
+			remoteInfo := &checker.RemoteHardwareInfo{
+				Host:         hardwareInfo.Host,
+				HardwareInfo: hardwareInfo,
+			}
+			rep.PrintHardwareResults([]*checker.RemoteHardwareInfo{remoteInfo})
+		}
 		return
 	}
 
-	if hardwareInfo != nil {
-		rep.PrintHardwareResults(hardwareInfo)
+	// 多主机模式：对每台主机执行硬件信息收集
+	var remoteHardwareInfos []*checker.RemoteHardwareInfo
+
+	// 检查是否包含本地主机
+	localHost, _ := os.Hostname()
+	if localHost == "" {
+		localHost = "localhost"
+	}
+
+	for _, host := range cfg.Hosts {
+		if cfg.Verbose {
+			fmt.Printf("正在收集主机 %s 的硬件信息...\n", host)
+		}
+
+		// 如果是本地主机，直接运行本地收集
+		if host == localHost || host == "localhost" || host == "127.0.0.1" {
+			hardwareInfo, err := hardwareChecker.Run()
+			if err != nil {
+				rep.PrintVerbose("警告：主机 %s 硬件信息收集失败：%v\n", host, err)
+				continue
+			}
+			remoteHardwareInfos = append(remoteHardwareInfos, &checker.RemoteHardwareInfo{
+				Host:         host,
+				HardwareInfo: hardwareInfo,
+			})
+		} else {
+			// 远程主机，使用 SSH 连接
+			remoteInfo := hardwareChecker.RunRemote(host)
+			if remoteInfo.Error != nil {
+				rep.PrintVerbose("警告：主机 %s 硬件信息收集失败：%v\n", host, remoteInfo.Error)
+				continue
+			}
+			remoteHardwareInfos = append(remoteHardwareInfos, remoteInfo)
+		}
+	}
+
+	if len(remoteHardwareInfos) > 0 {
+		rep.PrintHardwareResults(remoteHardwareInfos)
+	} else {
+		rep.PrintError(fmt.Errorf("未能收集到任何主机的硬件信息"))
 	}
 }

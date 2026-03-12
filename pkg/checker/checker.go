@@ -966,6 +966,16 @@ type HardwareInfo struct {
 	MemoryInfo *MemoryInfo
 }
 
+// RemoteHardwareInfo 远程主机硬件信息
+type RemoteHardwareInfo struct {
+	// Host 主机名
+	Host string
+	// HardwareInfo 硬件信息
+	HardwareInfo *HardwareInfo
+	// Error 错误信息（如果连接或收集失败）
+	Error error
+}
+
 // CPUInfo CPU 详细信息
 type CPUInfo struct {
 	// Model CPU 型号
@@ -1096,6 +1106,359 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 	info.MemoryInfo = hc.collectMemoryInfo()
 
 	return info, nil
+}
+
+// RunRemote 通过 SSH 连接远程主机并收集硬件信息
+// 参数 host: 远程主机名或 IP 地址
+// 返回：包含远程主机硬件信息的 RemoteHardwareInfo 结构体
+func (hc *HardwareChecker) RunRemote(host string) *RemoteHardwareInfo {
+	result := &RemoteHardwareInfo{
+		Host: host,
+	}
+
+	// 构建 SSH 命令，在远程主机上执行 dbcheckperf -r H
+	// 使用 SSH 执行远程命令收集硬件信息
+	cmd := exec.Command("ssh", host, "dbcheckperf", "-r", "H")
+	output, err := cmd.Output()
+	if err != nil {
+		result.Error = fmt.Errorf("SSH 连接失败或远程命令执行失败：%v", err)
+		return result
+	}
+
+	// 解析输出，提取硬件信息
+	result.HardwareInfo = hc.parseRemoteOutput(string(output), host)
+	if result.HardwareInfo == nil {
+		result.Error = fmt.Errorf("无法解析远程主机硬件信息")
+	}
+
+	return result
+}
+
+// parseRemoteOutput 解析远程主机输出
+// 通过 SSH 执行本地 dbcheckperf -r H 命令，然后解析输出
+func (hc *HardwareChecker) parseRemoteOutput(output string, host string) *HardwareInfo {
+	// 简单方法：直接执行收集命令获取原始数据
+	// 使用 SSH 执行底层硬件收集命令
+	info := &HardwareInfo{
+		Host: host,
+	}
+
+	// 通过 SSH 执行各个硬件收集命令
+	info.CPUInfo = hc.collectRemoteCPUInfo(host)
+	info.DiskInfos = hc.collectRemoteDiskInfo(host)
+	info.RAIDInfo = hc.collectRemoteRAIDInfo(host)
+	info.NICInfos = hc.collectRemoteNICInfo(host)
+	info.MemoryInfo = hc.collectRemoteMemoryInfo(host)
+
+	return info
+}
+
+// collectRemoteCPUInfo 通过 SSH 收集远程主机 CPU 信息
+func (hc *HardwareChecker) collectRemoteCPUInfo(host string) *CPUInfo {
+	cpuInfo := &CPUInfo{}
+
+	// 使用 SSH 执行 lscpu 命令
+	cmd := exec.Command("ssh", host, "lscpu")
+	output, err := cmd.Output()
+	if err == nil {
+		cpuInfo = hc.parseLscpuOutput(string(output))
+	}
+
+	// 如果 lscpu 失败或信息不完整，使用备用方法
+	if cpuInfo.Cores == 0 {
+		cmd = exec.Command("ssh", host, "nproc")
+		output, err = cmd.Output()
+		if err == nil {
+			cores, _ := strconv.Atoi(strings.TrimSpace(string(output)))
+			if cores > 0 {
+				cpuInfo.Cores = cores
+			}
+		}
+	}
+	if cpuInfo.Sockets == 0 {
+		cpuInfo.Sockets = 1
+	}
+	if cpuInfo.NUMANodes == 0 {
+		cpuInfo.NUMANodes = 1
+	}
+
+	return cpuInfo
+}
+
+// collectRemoteDiskInfo 通过 SSH 收集远程主机磁盘信息
+func (hc *HardwareChecker) collectRemoteDiskInfo(host string) []*DiskInfo {
+	var diskInfos []*DiskInfo
+
+	// 使用 SSH 执行 lsblk 命令获取磁盘列表
+	cmd := exec.Command("ssh", host, "lsblk", "-nd", "-o", "NAME,MODEL,SERIAL,TYPE,SIZE,ROTA", "--bytes")
+	output, err := cmd.Output()
+	if err != nil {
+		return diskInfos
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 6 {
+			continue
+		}
+
+		diskInfo := &DiskInfo{
+			Name: fields[0],
+		}
+
+		// 解析型号（可能包含空格，需要特殊处理）
+		if len(fields) >= 2 && fields[1] != "-" {
+			diskInfo.Model = fields[1]
+			diskInfo.Vendor = hc.extractVendor(fields[1])
+		}
+
+		// 解析类型
+		if len(fields) >= 4 {
+			diskType := strings.ToLower(fields[3])
+			if diskType == "disk" {
+				// 判断是否为旋转磁盘
+				if len(fields) >= 6 && fields[5] == "0" {
+					diskInfo.Rotational = false
+					diskInfo.Type = "SSD"
+				} else if len(fields) >= 6 && fields[5] == "1" {
+					diskInfo.Rotational = true
+					diskInfo.Type = "HDD"
+				} else {
+					diskInfo.Type = "SSD"
+				}
+				// NVMe 特殊处理
+				if strings.HasPrefix(fields[0], "nvme") {
+					diskInfo.Type = "NVMe"
+				}
+			}
+		}
+
+		// 解析大小
+		if len(fields) >= 5 {
+			sizeStr := fields[4]
+			// 解析带单位的大小（如 500G, 1T）
+			size := hc.parseSizeString(sizeStr)
+			diskInfo.Size = size
+		}
+
+		// 只添加有实际大小的磁盘
+		if diskInfo.Size > 0 {
+			diskInfos = append(diskInfos, diskInfo)
+		}
+	}
+
+	return diskInfos
+}
+
+// collectRemoteRAIDInfo 通过 SSH 收集远程主机 RAID 信息
+func (hc *HardwareChecker) collectRemoteRAIDInfo(host string) *RAIDConfigInfo {
+	info := &RAIDConfigInfo{
+		StripeSize: 64, // 默认条带大小
+	}
+
+	// 使用 SSH 执行 lspci 检测 RAID 卡
+	cmd := exec.Command("ssh", host, "lspci")
+	output, err := cmd.Output()
+	if err == nil {
+		hc.parseLspciForRAID(string(output), info)
+	}
+
+	// 检查软件 RAID
+	cmd = exec.Command("ssh", host, "cat", "/proc/mdstat")
+	output, err = cmd.Output()
+	if err == nil && strings.Contains(string(output), "active") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "Linux Software RAID (mdraid)"
+		}
+		info.StripeSize = 512
+	}
+
+	return info
+}
+
+// collectRemoteNICInfo 通过 SSH 收集远程主机网卡信息
+func (hc *HardwareChecker) collectRemoteNICInfo(host string) []*NICInfo {
+	var nicInfos []*NICInfo
+
+	// 使用 SSH 执行 ip 命令获取网卡列表
+	cmd := exec.Command("ssh", host, "ip", "-o", "link", "show")
+	output, err := cmd.Output()
+	if err != nil {
+		return nicInfos
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		// 提取网卡名称（去掉冒号）
+		name := strings.TrimSuffix(fields[1], ":")
+
+		// 跳过 lo 回环接口和虚拟接口
+		if name == "lo" || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") ||
+			strings.HasPrefix(name, "br-") || strings.HasPrefix(name, "tap") {
+			continue
+		}
+
+		nicInfo := &NICInfo{
+			Name: name,
+			MTU:  1500, // 默认 MTU
+		}
+
+		// 获取 MAC 地址
+		if len(fields) >= 5 {
+			for i, field := range fields {
+				if strings.Count(field, ":") == 5 && len(field) == 17 {
+					nicInfo.MACAddress = strings.ToLower(field)
+					// 下一个字段可能是 MTU
+					if i+2 < len(fields) && strings.HasPrefix(fields[i+2], "mtu") {
+						mtu, _ := strconv.Atoi(fields[i+2][4:])
+						if mtu > 0 {
+							nicInfo.MTU = mtu
+						}
+					}
+					break
+				}
+			}
+		}
+
+		// 获取速率
+		cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/speed", name))
+		speedOutput, err := cmd.Output()
+		if err == nil {
+			speed, _ := strconv.Atoi(strings.TrimSpace(string(speedOutput)))
+			if speed > 0 {
+				nicInfo.Speed = speed
+			}
+		}
+
+		// 获取队列大小
+		cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/tx_queue_len", name))
+		queueOutput, err := cmd.Output()
+		if err == nil {
+			queueSize, _ := strconv.Atoi(strings.TrimSpace(string(queueOutput)))
+			if queueSize > 0 {
+				nicInfo.QueueSize = queueSize
+			}
+		}
+		if nicInfo.QueueSize == 0 {
+			nicInfo.QueueSize = 1000
+		}
+
+		// 检测是否为 bond 接口
+		if strings.HasPrefix(name, "bond") {
+			nicInfo.IsBond = true
+			// 获取绑定模式
+			cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/bonding/mode", name))
+			modeOutput, err := cmd.Output()
+			if err == nil {
+				nicInfo.BondMode = strings.TrimSpace(string(modeOutput))
+			}
+			// 获取从网卡数量
+			cmd = exec.Command("ssh", host, "cat", fmt.Sprintf("/sys/class/net/%s/bonding/slaves", name))
+			slavesOutput, err := cmd.Output()
+			if err == nil {
+				nicInfo.BondSlaves = len(strings.Fields(string(slavesOutput)))
+			}
+		}
+
+		// 获取驱动信息
+		cmd = exec.Command("ssh", host, "ethtool", "-i", name)
+		driverOutput, err := cmd.Output()
+		if err == nil {
+			for _, line := range strings.Split(string(driverOutput), "\n") {
+				if strings.HasPrefix(line, "driver:") {
+					nicInfo.Driver = strings.TrimSpace(strings.TrimPrefix(line, "driver:"))
+					break
+				}
+			}
+		}
+		if nicInfo.Driver == "" {
+			nicInfo.Driver = "Unknown"
+		}
+
+		nicInfos = append(nicInfos, nicInfo)
+	}
+
+	return nicInfos
+}
+
+// collectRemoteMemoryInfo 通过 SSH 收集远程主机内存信息
+func (hc *HardwareChecker) collectRemoteMemoryInfo(host string) *MemoryInfo {
+	memInfo := &MemoryInfo{
+		MemoryType:  "Unknown",
+		MemorySpeed: 0,
+		MemorySlots: 0,
+	}
+
+	// 使用 SSH 执行 free 命令获取总内存
+	cmd := exec.Command("ssh", host, "free", "-b")
+	output, err := cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "Mem:") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					total, _ := strconv.ParseUint(fields[1], 10, 64)
+					memInfo.TotalMemory = total
+				}
+				break
+			}
+		}
+	}
+
+	// 尝试从 /sys/devices/system/node 获取 NUMA 节点数
+	cmd = exec.Command("ssh", host, "ls", "-d", "/sys/devices/system/node/node*")
+	nodeOutput, err := cmd.Output()
+	if err == nil {
+		nodes := strings.Fields(string(nodeOutput))
+		memInfo.NUMANodes = len(nodes)
+		if memInfo.NUMANodes == 0 {
+			memInfo.NUMANodes = 1
+		}
+	} else {
+		memInfo.NUMANodes = 1
+	}
+
+	// 内存插槽数使用 NUMA 节点数估算
+	memInfo.MemorySlots = memInfo.NUMANodes
+
+	return memInfo
+}
+
+// parseSizeString 解析带单位的大小字符串（如 500G, 1T, 500M）
+func (hc *HardwareChecker) parseSizeString(sizeStr string) uint64 {
+	sizeStr = strings.ToUpper(sizeStr)
+	var multiplier uint64 = 1
+
+	if strings.HasSuffix(sizeStr, "T") {
+		multiplier = 1024 * 1024 * 1024 * 1024
+		sizeStr = strings.TrimSuffix(sizeStr, "T")
+	} else if strings.HasSuffix(sizeStr, "G") {
+		multiplier = 1024 * 1024 * 1024
+		sizeStr = strings.TrimSuffix(sizeStr, "G")
+	} else if strings.HasSuffix(sizeStr, "M") {
+		multiplier = 1024 * 1024
+		sizeStr = strings.TrimSuffix(sizeStr, "M")
+	} else if strings.HasSuffix(sizeStr, "K") {
+		multiplier = 1024
+		sizeStr = strings.TrimSuffix(sizeStr, "K")
+	}
+
+	size, _ := strconv.ParseUint(sizeStr, 10, 64)
+	return size * multiplier
 }
 
 // Run 收集系统信息
