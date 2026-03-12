@@ -49,7 +49,12 @@ jobs:
       - name: Prepare modules
         run: |
           go env
+          go mod tidy
+          go mod verify
           go mod download
+
+      - name: Run go vet
+        run: go vet ./...
 
       - name: Build binary
         # Disable CGO for reproducible cross-compilation
@@ -60,7 +65,7 @@ jobs:
         run: |
           OUTPUT="dist/${{ matrix.goos }}_${{ matrix.goarch }}/dbcheckperf${{ matrix.suffix }}"
           echo "Building to $OUTPUT"
-          go build -o "$OUTPUT" -v ./cmd
+          go build -o "$OUTPUT" -v ./cmd/main.go
 
       - name: Verify binary exists
         run: ls -l "dist/${{ matrix.goos }}_${{ matrix.goarch }}/"
