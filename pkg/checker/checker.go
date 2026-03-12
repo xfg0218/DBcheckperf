@@ -1062,12 +1062,15 @@ func NewSystemChecker() *SystemChecker {
 type HardwareChecker struct {
 	// Verbose 是否显示详细输出
 	Verbose bool
+	// OSInfo 操作系统信息
+	OSInfo *utils.OSInfo
 }
 
 // NewHardwareChecker 创建新的硬件信息检查器
 func NewHardwareChecker(verbose bool) *HardwareChecker {
 	return &HardwareChecker{
 		Verbose: verbose,
+		OSInfo:  utils.GetOSInfo(),
 	}
 }
 
@@ -1845,13 +1848,23 @@ func sumSlice(values []float64) float64 {
 
 // collectCPUInfo 收集 CPU 信息
 func (hc *HardwareChecker) collectCPUInfo() *CPUInfo {
+	if hc.OSInfo.IsFreeBSD {
+		return hc.collectCPUInfoFreeBSD()
+	}
+	return hc.collectCPUInfoLinux()
+}
+
+// collectCPUInfoLinux 收集 Linux CPU 信息
+func (hc *HardwareChecker) collectCPUInfoLinux() *CPUInfo {
 	cpuInfo := &CPUInfo{}
 
 	// 使用 lscpu 一次性获取所有 CPU 信息
-	cmd := exec.Command("lscpu")
-	output, err := cmd.Output()
-	if err == nil {
-		cpuInfo = hc.parseLscpuOutput(string(output))
+	if utils.CommandExists("lscpu") {
+		cmd := exec.Command("lscpu")
+		output, err := cmd.Output()
+		if err == nil {
+			cpuInfo = hc.parseLscpuOutput(string(output))
+		}
 	}
 
 	// 如果 lscpu 失败或信息不完整，使用备用方法
@@ -1863,6 +1876,113 @@ func (hc *HardwareChecker) collectCPUInfo() *CPUInfo {
 	}
 	if cpuInfo.NUMANodes == 0 {
 		cpuInfo.NUMANodes = 1
+	}
+
+	// ARM64 特殊处理
+	if hc.OSInfo.Arch == "aarch64" && cpuInfo.Model == "" {
+		cpuInfo.Model = hc.getARMCPUModel()
+	}
+
+	return cpuInfo
+}
+
+// getARMCPUModel 获取 ARM CPU 型号
+func (hc *HardwareChecker) getARMCPUModel() string {
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return "Unknown"
+	}
+
+	var cpuImplementer, cpuPart string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "CPU implementer") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				cpuImplementer = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.HasPrefix(line, "CPU part") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				cpuPart = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+
+	// 解析 ARM CPU 型号
+	if cpuImplementer == "0x41" { // ARM
+		switch cpuPart {
+		case "0xd03":
+			return "Cortex-A53"
+		case "0xd07":
+			return "Cortex-A57"
+		case "0xd08":
+			return "Cortex-A72"
+		case "0xd09":
+			return "Cortex-A73"
+		case "0xd0a":
+			return "Cortex-A75"
+		case "0xd40":
+			return "Cortex-A76"
+		case "0xd41":
+			return "Cortex-A78"
+		case "0xd42":
+			return "Cortex-A710"
+		case "0xd44":
+			return "Cortex-X1"
+		case "0xd47":
+			return "Cortex-A715"
+		case "0xd4e":
+			return "Cortex-X2"
+		}
+	} else if cpuImplementer == "0x4e" { // NVIDIA
+		return "NVIDIA Carmel"
+	} else if cpuImplementer == "0x51" { // Qualcomm
+		return "Qualcomm Kryo"
+	}
+
+	return "Unknown ARM CPU"
+}
+
+// collectCPUInfoFreeBSD 收集 FreeBSD CPU 信息
+func (hc *HardwareChecker) collectCPUInfoFreeBSD() *CPUInfo {
+	cpuInfo := &CPUInfo{
+		Sockets:   1,
+		NUMANodes: 1,
+	}
+
+	// 获取 CPU 型号
+	cmd := exec.Command("sysctl", "hw.model")
+	output, err := cmd.Output()
+	if err == nil {
+		line := strings.TrimSpace(string(output))
+		if idx := strings.Index(line, ":"); idx != -1 {
+			cpuInfo.Model = strings.TrimSpace(line[idx+1:])
+		}
+	}
+
+	// 获取 CPU 核心数
+	cmd = exec.Command("sysctl", "hw.ncpu")
+	output, err = cmd.Output()
+	if err == nil {
+		line := strings.TrimSpace(string(output))
+		if idx := strings.Index(line, ":"); idx != -1 {
+			cores, _ := strconv.Atoi(strings.TrimSpace(line[idx+1:]))
+			cpuInfo.Cores = cores
+		}
+	}
+
+	// 获取物理核心数
+	cmd = exec.Command("sysctl", "hw.ncpu_phys")
+	output, err = cmd.Output()
+	if err == nil {
+		line := strings.TrimSpace(string(output))
+		if idx := strings.Index(line, ":"); idx != -1 {
+			phys, _ := strconv.Atoi(strings.TrimSpace(line[idx+1:]))
+			if phys > 0 {
+				cpuInfo.Cores = phys
+			}
+		}
 	}
 
 	return cpuInfo
@@ -1946,6 +2066,14 @@ func (hc *HardwareChecker) getCPUModelFallback() string {
 
 // collectDiskInfo 收集磁盘信息
 func (hc *HardwareChecker) collectDiskInfo() []*DiskInfo {
+	if hc.OSInfo.IsFreeBSD {
+		return hc.collectDiskInfoFreeBSD()
+	}
+	return hc.collectDiskInfoLinux()
+}
+
+// collectDiskInfoLinux 收集 Linux 磁盘信息
+func (hc *HardwareChecker) collectDiskInfoLinux() []*DiskInfo {
 	var diskInfos []*DiskInfo
 
 	// 遍历 /sys/block 获取所有块设备
@@ -1967,7 +2095,7 @@ func (hc *HardwareChecker) collectDiskInfo() []*DiskInfo {
 		}
 
 		// 获取磁盘信息
-		hc.collectDiskBasicInfo(name, diskInfo)
+		hc.collectDiskBasicInfoLinux(name, diskInfo)
 
 		// 只添加有实际大小的磁盘
 		if diskInfo.Size > 0 {
@@ -1978,8 +2106,8 @@ func (hc *HardwareChecker) collectDiskInfo() []*DiskInfo {
 	return diskInfos
 }
 
-// collectDiskBasicInfo 收集磁盘基本信息
-func (hc *HardwareChecker) collectDiskBasicInfo(name string, diskInfo *DiskInfo) {
+// collectDiskBasicInfoLinux 收集 Linux 磁盘基本信息
+func (hc *HardwareChecker) collectDiskBasicInfoLinux(name string, diskInfo *DiskInfo) {
 	// 获取磁盘大小
 	sizePath := fmt.Sprintf("/sys/block/%s/size", name)
 	if data, err := os.ReadFile(sizePath); err == nil {
@@ -2003,12 +2131,12 @@ func (hc *HardwareChecker) collectDiskBasicInfo(name string, diskInfo *DiskInfo)
 		diskInfo.Type = "NVMe"
 	}
 
-	// 获取磁盘型号和厂家
-	diskInfo.Model, diskInfo.Vendor = hc.getDiskModel(name)
+	// 获取磁盘型号和厂家（多种方法）
+	diskInfo.Model, diskInfo.Vendor = hc.getDiskModelLinux(name)
 }
 
-// getDiskModel 获取磁盘型号和厂家
-func (hc *HardwareChecker) getDiskModel(name string) (string, string) {
+// getDiskModelLinux 获取 Linux 磁盘型号和厂家
+func (hc *HardwareChecker) getDiskModelLinux(name string) (string, string) {
 	// 方法 1: 尝试从 /sys/block 读取（最快）
 	modelPath := fmt.Sprintf("/sys/block/%s/device/model", name)
 	if data, err := os.ReadFile(modelPath); err == nil {
@@ -2018,54 +2146,217 @@ func (hc *HardwareChecker) getDiskModel(name string) (string, string) {
 		}
 	}
 
-	// 方法 2: 尝试使用 hdparm
-	if cmd, err := exec.LookPath("hdparm"); err == nil {
-		output, err := exec.Command(cmd, "-I", "/dev/"+name).Output()
-		if err == nil {
-			if model := hc.parseHdparmOutput(string(output)); model != "" {
-				return model, hc.extractVendor(model)
-			}
+	// 方法 2: 尝试使用 smartctl（通用，支持 HDD/SSD/NVMe）
+	if utils.CommandExists("smartctl") {
+		if model, vendor := hc.getDiskModelSmartctl(name); model != "" {
+			return model, vendor
 		}
 	}
 
-	// 方法 3: 尝试使用 nvme-cli（针对 NVMe 磁盘）
-	if strings.HasPrefix(name, "nvme") {
-		if cmd, err := exec.LookPath("nvme"); err == nil {
-			output, err := exec.Command(cmd, "list").Output()
-			if err == nil {
-				if model := hc.parseNvmeListOutput(string(output), name); model != "" {
-					return model, hc.extractVendor(model)
-				}
-			}
+	// 方法 3: 尝试使用 hdparm（仅支持 SATA/SAS）
+	if utils.CommandExists("hdparm") {
+		if model, vendor := hc.getDiskModelHdparm(name); model != "" {
+			return model, vendor
+		}
+	}
+
+	// 方法 4: 尝试使用 nvme-cli（仅支持 NVMe）
+	if utils.CommandExists("nvme") && strings.HasPrefix(name, "nvme") {
+		if model, vendor := hc.getDiskModelNvme(name); model != "" {
+			return model, vendor
 		}
 	}
 
 	return "Unknown", ""
 }
 
-// parseHdparmOutput 解析 hdparm 输出
-func (hc *HardwareChecker) parseHdparmOutput(output string) string {
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
+// getDiskModelSmartctl 使用 smartctl 获取磁盘型号
+func (hc *HardwareChecker) getDiskModelSmartctl(name string) (string, string) {
+	device := "/dev/" + name
+	// NVMe 设备需要特殊处理
+	if strings.HasPrefix(name, "nvme") {
+		device = "/dev/" + name
+	}
+
+	cmd := exec.Command("smartctl", "-i", device)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", ""
+	}
+
+	var model, vendor string
+	for _, line := range strings.Split(string(output), "\n") {
 		if strings.HasPrefix(line, "Model Number:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "Model Number:"))
+			model = strings.TrimSpace(strings.TrimPrefix(line, "Model Number:"))
+		} else if strings.HasPrefix(line, "Device Model:") {
+			model = strings.TrimSpace(strings.TrimPrefix(line, "Device Model:"))
+		} else if strings.HasPrefix(line, "Vendor:") {
+			vendor = strings.TrimSpace(strings.TrimPrefix(line, "Vendor:"))
 		}
 	}
-	return ""
+
+	if model == "" {
+		return "", ""
+	}
+	if vendor == "" {
+		vendor = hc.extractVendor(model)
+	}
+	return model, vendor
 }
 
-// parseNvmeListOutput 解析 nvme list 输出
-func (hc *HardwareChecker) parseNvmeListOutput(output string, diskName string) string {
-	lines := strings.Split(output, "\n")
+// getDiskModelHdparm 使用 hdparm 获取磁盘型号
+func (hc *HardwareChecker) getDiskModelHdparm(name string) (string, string) {
+	cmd := exec.Command("hdparm", "-I", "/dev/"+name)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", ""
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Model Number:") {
+			model := strings.TrimSpace(strings.TrimPrefix(line, "Model Number:"))
+			return model, hc.extractVendor(model)
+		}
+	}
+	return "", ""
+}
+
+// getDiskModelNvme 使用 nvme-cli 获取磁盘型号
+func (hc *HardwareChecker) getDiskModelNvme(name string) (string, string) {
+	cmd := exec.Command("nvme", "list")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", ""
+	}
+
+	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, diskName) {
+		if strings.Contains(line, name) {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
-				return fields[1]
+				model := fields[1]
+				return model, hc.extractVendor(model)
 			}
 		}
 	}
-	return ""
+	return "", ""
+}
+
+// collectDiskInfoFreeBSD 收集 FreeBSD 磁盘信息
+func (hc *HardwareChecker) collectDiskInfoFreeBSD() []*DiskInfo {
+	var diskInfos []*DiskInfo
+
+	// 使用 camcontrol 获取磁盘列表
+	cmd := exec.Command("camcontrol", "devlist")
+	output, err := cmd.Output()
+	if err != nil {
+		return diskInfos
+	}
+
+	// 解析 camcontrol 输出
+	diskNames := hc.parseCamcontrolDevlist(string(output))
+
+	for _, name := range diskNames {
+		diskInfo := &DiskInfo{
+			Name: name,
+			Type: "Unknown",
+		}
+
+		// 获取磁盘详细信息
+		hc.collectDiskBasicInfoFreeBSD(name, diskInfo)
+
+		if diskInfo.Size > 0 {
+			diskInfos = append(diskInfos, diskInfo)
+		}
+	}
+
+	return diskInfos
+}
+
+// parseCamcontrolDevlist 解析 camcontrol devlist 输出
+func (hc *HardwareChecker) parseCamcontrolDevlist(output string) []string {
+	var disks []string
+	for _, line := range strings.Split(output, "\n") {
+		// 示例：<da0:pass0:0:0:0> ATA disk directly attached
+		if strings.Contains(line, "disk") {
+			parts := strings.Split(line, ":")
+			if len(parts) > 0 {
+				// 提取磁盘名（如 da0）
+				namePart := strings.TrimSpace(parts[0])
+				namePart = strings.Trim(namePart, "<")
+				if strings.HasPrefix(namePart, "da") || strings.HasPrefix(namePart, "ada") || strings.HasPrefix(namePart, "nvd") {
+					disks = append(disks, namePart)
+				}
+			}
+		}
+	}
+	return disks
+}
+
+// collectDiskBasicInfoFreeBSD 收集 FreeBSD 磁盘基本信息
+func (hc *HardwareChecker) collectDiskBasicInfoFreeBSD(name string, diskInfo *DiskInfo) {
+	// 使用 smartctl 获取磁盘信息
+	if utils.CommandExists("smartctl") {
+		device := "/dev/" + name
+		cmd := exec.Command("smartctl", "-i", device)
+		output, err := cmd.Output()
+		if err == nil {
+			hc.parseSmartctlFreeBSDOutput(string(output), diskInfo)
+		}
+	}
+
+	// 使用 camcontrol 获取磁盘信息
+	cmd := exec.Command("camcontrol", "identify", name)
+	output, err := cmd.Output()
+	if err == nil {
+		hc.parseCamcontrolIdentify(string(output), diskInfo)
+	}
+}
+
+// parseSmartctlFreeBSDOutput 解析 FreeBSD smartctl 输出
+func (hc *HardwareChecker) parseSmartctlFreeBSDOutput(output string, diskInfo *DiskInfo) {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "Device Model:") || strings.HasPrefix(line, "Model Number:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				diskInfo.Model = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.HasPrefix(line, "User Capacity:") {
+			// 解析 "User Capacity: 500,107,862,016 bytes [500 GB]"
+			if idx := strings.Index(line, "bytes"); idx != -1 {
+				sizeStr := strings.TrimSpace(line[:idx])
+				if idx2 := strings.LastIndex(sizeStr, " "); idx2 != -1 {
+					sizeStr = sizeStr[idx2+1:]
+					sizeStr = strings.ReplaceAll(sizeStr, ",", "")
+					size, _ := strconv.ParseUint(sizeStr, 10, 64)
+					diskInfo.Size = size
+				}
+			}
+		}
+		if strings.HasPrefix(line, "Rotation Rate:") {
+			if strings.Contains(line, "Solid State Device") {
+				diskInfo.Type = "SSD"
+				diskInfo.Rotational = false
+			} else if strings.Contains(line, "rpm") {
+				diskInfo.Type = "HDD"
+				diskInfo.Rotational = true
+			}
+		}
+	}
+}
+
+// parseCamcontrolIdentify 解析 camcontrol identify 输出
+func (hc *HardwareChecker) parseCamcontrolIdentify(output string, diskInfo *DiskInfo) {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "model number") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				diskInfo.Model = strings.TrimSpace(parts[1])
+			}
+		}
+	}
 }
 
 // extractVendor 从型号中提取厂家
@@ -2103,56 +2394,30 @@ func (hc *HardwareChecker) extractVendor(model string) string {
 
 // collectRAIDInfo 收集 RAID 信息
 func (hc *HardwareChecker) collectRAIDInfo() *RAIDConfigInfo {
+	if hc.OSInfo.IsFreeBSD {
+		return hc.collectRAIDInfoFreeBSD()
+	}
+	return hc.collectRAIDInfoLinux()
+}
+
+// collectRAIDInfoLinux 收集 Linux RAID 信息
+func (hc *HardwareChecker) collectRAIDInfoLinux() *RAIDConfigInfo {
 	info := &RAIDConfigInfo{}
 
 	// 使用 lspci 检测 RAID 卡
-	cmd := exec.Command("lspci")
-	output, err := cmd.Output()
-	if err == nil {
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			lineLower := strings.ToLower(line)
-			if strings.Contains(lineLower, "raid") || strings.Contains(lineLower, "sas controller") {
-				info.HasRAID = true
-				// 提取型号
-				if idx := strings.Index(line, ":"); idx != -1 {
-					info.RAIDModel = strings.TrimSpace(line[idx+1:])
-				}
-				break
-			}
+	if utils.CommandExists("lspci") {
+		cmd := exec.Command("lspci")
+		output, err := cmd.Output()
+		if err == nil {
+			hc.parseLspciForRAID(string(output), info)
 		}
 	}
 
-	// 使用 megacli 获取详细信息
-	if info.HasRAID {
-		cmd = exec.Command("megacli", "adpallinfo", "-aALL")
-		output, err := cmd.Output()
-		if err == nil {
-			lines := strings.Split(string(output), "\n")
-			for _, line := range lines {
-				if strings.Contains(line, "Product Name") {
-					parts := strings.SplitN(line, ":", 2)
-					if len(parts) == 2 {
-						info.RAIDModel = strings.TrimSpace(parts[1])
-					}
-				}
-				if strings.Contains(line, "BBU") {
-					info.BatteryBackup = !strings.Contains(strings.ToUpper(line), "NOT")
-				}
-				if strings.Contains(line, "Strip Size") || strings.Contains(line, "Stripe Size") {
-					parts := strings.Fields(line)
-					for _, part := range parts {
-						if strings.Contains(strings.ToLower(part), "kb") {
-							size, _ := strconv.Atoi(strings.TrimSuffix(strings.ToUpper(part), "KB"))
-							if size > 0 {
-								info.StripeSize = size
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	// 使用多种 RAID 工具获取详细信息
+	hc.collectRAIDInfoMegacli(info)
+	hc.collectRAIDInfoStorcli(info)
+	hc.collectRAIDInfoPerccli(info)
+	hc.collectRAIDInfoSsacli(info)
 
 	// 检测软件 RAID
 	data, err := os.ReadFile("/proc/mdstat")
@@ -2172,8 +2437,195 @@ func (hc *HardwareChecker) collectRAIDInfo() *RAIDConfigInfo {
 	return info
 }
 
+// parseLspciForRAID 解析 lspci 输出检测 RAID 卡
+func (hc *HardwareChecker) parseLspciForRAID(output string, info *RAIDConfigInfo) {
+	raidKeywords := []string{
+		"raid", "sas controller", "storage controller", "perc",
+		"smart array", "mega raid", "poweredge raid",
+	}
+	for _, line := range strings.Split(output, "\n") {
+		lineLower := strings.ToLower(line)
+		for _, keyword := range raidKeywords {
+			if strings.Contains(lineLower, keyword) {
+				info.HasRAID = true
+				// 提取型号
+				if idx := strings.Index(line, ":"); idx != -1 {
+					info.RAIDModel = strings.TrimSpace(line[idx+1:])
+				}
+				break
+			}
+		}
+		if info.HasRAID {
+			break
+		}
+	}
+}
+
+// collectRAIDInfoMegacli 使用 megacli 获取 RAID 信息
+func (hc *HardwareChecker) collectRAIDInfoMegacli(info *RAIDConfigInfo) {
+	if !utils.CommandExists("megacli") {
+		return
+	}
+
+	cmd := exec.Command("megacli", "adpallinfo", "-aALL")
+	output, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Product Name") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				info.RAIDModel = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.Contains(line, "BBU") && strings.Contains(line, "Present") {
+			info.BatteryBackup = true
+		}
+		if strings.Contains(line, "Stripe Size") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				size := strings.TrimSpace(parts[1])
+				if strings.Contains(size, "KB") {
+					size = strings.ReplaceAll(size, "KB", "")
+					size = strings.TrimSpace(size)
+					if val, err := strconv.Atoi(size); err == nil {
+						info.StripeSize = val
+					}
+				}
+			}
+		}
+	}
+}
+
+// collectRAIDInfoStorcli 使用 storcli 获取 RAID 信息
+func (hc *HardwareChecker) collectRAIDInfoStorcli(info *RAIDConfigInfo) {
+	if !utils.CommandExists("storcli") {
+		return
+	}
+
+	cmd := exec.Command("storcli", "/c0", "show", "all")
+	output, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	content := string(output)
+	if strings.Contains(content, "RAID Level") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "Broadcom/LSI MegaRAID"
+		}
+		// 解析 RAID 级别
+		for _, line := range strings.Split(content, "\n") {
+			if strings.Contains(line, "RAID Level") {
+				if strings.Contains(line, "RAID0") {
+					info.RAIDLevel = "RAID 0"
+				} else if strings.Contains(line, "RAID1") {
+					info.RAIDLevel = "RAID 1"
+				} else if strings.Contains(line, "RAID5") {
+					info.RAIDLevel = "RAID 5"
+				} else if strings.Contains(line, "RAID6") {
+					info.RAIDLevel = "RAID 6"
+				} else if strings.Contains(line, "RAID10") {
+					info.RAIDLevel = "RAID 10"
+				}
+			}
+		}
+	}
+}
+
+// collectRAIDInfoPerccli 使用 perccli 获取 RAID 信息（Dell PERC）
+func (hc *HardwareChecker) collectRAIDInfoPerccli(info *RAIDConfigInfo) {
+	if !utils.CommandExists("perccli") {
+		return
+	}
+
+	cmd := exec.Command("perccli", "/c0", "show", "all")
+	output, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	content := string(output)
+	if strings.Contains(content, "RAID Level") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "Dell PERC"
+		}
+	}
+}
+
+// collectRAIDInfoSsacli 使用 ssacli 获取 RAID 信息（HP SmartArray）
+func (hc *HardwareChecker) collectRAIDInfoSsacli(info *RAIDConfigInfo) {
+	if !utils.CommandExists("ssacli") && !utils.CommandExists("hpssacli") {
+		return
+	}
+
+	cmdName := "ssacli"
+	if !utils.CommandExists("ssacli") {
+		cmdName = "hpssacli"
+	}
+
+	cmd := exec.Command(cmdName, "controller", "all", "show", "config")
+	output, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	content := string(output)
+	if strings.Contains(content, "RAID") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "HP SmartArray"
+		}
+	}
+}
+
+// collectRAIDInfoFreeBSD 收集 FreeBSD RAID 信息
+func (hc *HardwareChecker) collectRAIDInfoFreeBSD() *RAIDConfigInfo {
+	info := &RAIDConfigInfo{}
+
+	// 使用 pciconf 检测 RAID 卡
+	cmd := exec.Command("pciconf", "-l")
+	output, err := cmd.Output()
+	if err == nil {
+		for _, line := range strings.Split(string(output), "\n") {
+			if strings.Contains(strings.ToLower(line), "mass storage") {
+				if strings.Contains(line, "raid") || strings.Contains(line, "sas") {
+					info.HasRAID = true
+					info.RAIDModel = "FreeBSD RAID Controller"
+				}
+			}
+		}
+	}
+
+	// 检测 gmirror 软件 RAID
+	cmd = exec.Command("gmirror", "status")
+	output, err = cmd.Output()
+	if err == nil && strings.Contains(string(output), "COMPLETE") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "FreeBSD gmirror"
+		}
+		info.StripeSize = 64
+	}
+
+	return info
+}
+
 // collectNICInfo 收集网卡信息
 func (hc *HardwareChecker) collectNICInfo() []*NICInfo {
+	if hc.OSInfo.IsFreeBSD {
+		return hc.collectNICInfoFreeBSD()
+	}
+	return hc.collectNICInfoLinux()
+}
+
+// collectNICInfoLinux 收集 Linux 网卡信息
+func (hc *HardwareChecker) collectNICInfoLinux() []*NICInfo {
 	var nicInfos []*NICInfo
 
 	// 遍历 /sys/class/net 获取所有网卡
@@ -2186,7 +2638,8 @@ func (hc *HardwareChecker) collectNICInfo() []*NICInfo {
 	for _, entry := range entries {
 		name := entry.Name()
 		// 跳过 lo 回环接口和虚拟接口
-		if name == "lo" || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") {
+		if name == "lo" || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") ||
+			strings.HasPrefix(name, "br-") || strings.HasPrefix(name, "tap") {
 			continue
 		}
 
@@ -2196,7 +2649,7 @@ func (hc *HardwareChecker) collectNICInfo() []*NICInfo {
 		}
 
 		// 收集网卡信息
-		hc.collectNICBasicInfo(name, nicInfo)
+		hc.collectNICBasicInfoLinux(name, nicInfo)
 
 		nicInfos = append(nicInfos, nicInfo)
 	}
@@ -2204,8 +2657,8 @@ func (hc *HardwareChecker) collectNICInfo() []*NICInfo {
 	return nicInfos
 }
 
-// collectNICBasicInfo 收集网卡基本信息
-func (hc *HardwareChecker) collectNICBasicInfo(name string, nicInfo *NICInfo) {
+// collectNICBasicInfoLinux 收集 Linux 网卡基本信息
+func (hc *HardwareChecker) collectNICBasicInfoLinux(name string, nicInfo *NICInfo) {
 	netPath := "/sys/class/net"
 
 	// 获取 MAC 地址
@@ -2218,9 +2671,12 @@ func (hc *HardwareChecker) collectNICBasicInfo(name string, nicInfo *NICInfo) {
 		nicInfo.MTU, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 	}
 
-	// 获取速率
+	// 获取速率（处理 -1 表示未知的情况）
 	if data, err := os.ReadFile(fmt.Sprintf("%s/%s/speed", netPath, name)); err == nil {
-		nicInfo.Speed, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		speed, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+		if speed > 0 {
+			nicInfo.Speed = speed
+		}
 	}
 
 	// 获取队列大小
@@ -2244,29 +2700,35 @@ func (hc *HardwareChecker) collectNICBasicInfo(name string, nicInfo *NICInfo) {
 		}
 	}
 
+	// 检测是否为 team 接口（RHEL7+）
+	if strings.HasPrefix(name, "team") {
+		nicInfo.IsBond = true
+		nicInfo.BondMode = "team"
+	}
+
 	// 获取驱动信息
-	nicInfo.Driver = hc.getNICDriver(name)
+	nicInfo.Driver = hc.getNICDriverLinux(name)
 }
 
-// getNICDriver 获取网卡驱动
-func (hc *HardwareChecker) getNICDriver(name string) string {
-	// 使用 ethtool
-	cmd := exec.Command("ethtool", "-i", name)
-	output, err := cmd.Output()
-	if err == nil {
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "driver:") {
-				return strings.TrimSpace(strings.TrimPrefix(line, "driver:"))
+// getNICDriverLinux 获取 Linux 网卡驱动
+func (hc *HardwareChecker) getNICDriverLinux(name string) string {
+	// 方法 1: 使用 ethtool
+	if utils.CommandExists("ethtool") {
+		cmd := exec.Command("ethtool", "-i", name)
+		output, err := cmd.Output()
+		if err == nil {
+			for _, line := range strings.Split(string(output), "\n") {
+				if strings.HasPrefix(line, "driver:") {
+					return strings.TrimSpace(strings.TrimPrefix(line, "driver:"))
+				}
 			}
 		}
 	}
 
-	// 尝试从 /sys/class/net 读取
+	// 方法 2: 从 /sys/class/net 读取
 	driverPath := fmt.Sprintf("/sys/class/net/%s/device/driver", name)
 	link, err := os.Readlink(driverPath)
 	if err == nil {
-		// 从链接中提取驱动名
 		parts := strings.Split(link, "/")
 		if len(parts) > 0 {
 			return parts[len(parts)-1]
@@ -2276,8 +2738,187 @@ func (hc *HardwareChecker) getNICDriver(name string) string {
 	return "Unknown"
 }
 
+// collectNICInfoFreeBSD 收集 FreeBSD 网卡信息
+func (hc *HardwareChecker) collectNICInfoFreeBSD() []*NICInfo {
+	var nicInfos []*NICInfo
+
+	// 使用 ifconfig 获取网卡列表
+	cmd := exec.Command("ifconfig", "-a")
+	output, err := cmd.Output()
+	if err != nil {
+		return nicInfos
+	}
+
+	// 解析 ifconfig 输出
+	interfaces := hc.parseIfconfigOutput(string(output))
+
+	for _, iface := range interfaces {
+		// 跳过 lo 回环接口和虚拟接口
+		if iface.Name == "lo" || strings.HasPrefix(iface.Name, "epair") ||
+			strings.HasPrefix(iface.Name, "vnet") || strings.HasPrefix(iface.Name, "tap") {
+			continue
+		}
+
+		nicInfo := &NICInfo{
+			Name: iface.Name,
+			MTU:  iface.MTU,
+		}
+
+		// 收集 FreeBSD 网卡信息
+		hc.collectNICBasicInfoFreeBSD(iface.Name, nicInfo)
+
+		nicInfos = append(nicInfos, nicInfo)
+	}
+
+	return nicInfos
+}
+
+// InterfaceInfo 临时结构体用于存储 ifconfig 解析结果
+type InterfaceInfo struct {
+	Name string
+	MTU  int
+}
+
+// parseIfconfigOutput 解析 ifconfig 输出
+func (hc *HardwareChecker) parseIfconfigOutput(output string) []InterfaceInfo {
+	var interfaces []InterfaceInfo
+	var currentInterface string
+	var currentMTU int
+
+	for _, line := range strings.Split(output, "\n") {
+		// 检测新的接口（行首没有空格且包含冒号）
+		if len(line) > 0 && line[0] != ' ' && strings.Contains(line, ":") {
+			// 保存之前的接口
+			if currentInterface != "" {
+				interfaces = append(interfaces, InterfaceInfo{
+					Name: currentInterface,
+					MTU:  currentMTU,
+				})
+			}
+			// 提取新接口名
+			parts := strings.Split(line, ":")
+			currentInterface = strings.TrimSpace(parts[0])
+			currentMTU = 1500 // 默认 MTU
+		} else if strings.Contains(line, "mtu") {
+			// 解析 MTU
+			for _, field := range strings.Fields(line) {
+				if strings.HasPrefix(field, "mtu") {
+					mtu, _ := strconv.Atoi(strings.TrimPrefix(field, "mtu"))
+					if mtu > 0 {
+						currentMTU = mtu
+					}
+				}
+			}
+		}
+	}
+
+	// 添加最后一个接口
+	if currentInterface != "" {
+		interfaces = append(interfaces, InterfaceInfo{
+			Name: currentInterface,
+			MTU:  currentMTU,
+		})
+	}
+
+	return interfaces
+}
+
+// collectNICBasicInfoFreeBSD 收集 FreeBSD 网卡基本信息
+func (hc *HardwareChecker) collectNICBasicInfoFreeBSD(name string, nicInfo *NICInfo) {
+	// 使用 ifconfig 获取详细信息
+	cmd := exec.Command("ifconfig", name)
+	output, err := cmd.Output()
+	if err == nil {
+		hc.parseIfconfigDetailOutput(string(output), nicInfo)
+	}
+
+	// 使用 sysctl 获取网卡驱动
+	nicInfo.Driver = hc.getNICDriverFreeBSD(name)
+
+	// 检测是否为 lagg 接口（FreeBSD 的 bond）
+	if strings.HasPrefix(name, "lagg") {
+		nicInfo.IsBond = true
+		nicInfo.BondMode = "lagg"
+		// 获取从网卡数量
+		cmd = exec.Command("ifconfig", name)
+		output, err = cmd.Output()
+		if err == nil {
+			nicInfo.BondSlaves = hc.countLaggSlaves(string(output))
+		}
+	}
+}
+
+// parseIfconfigDetailOutput 解析 ifconfig 详细输出
+func (hc *HardwareChecker) parseIfconfigDetailOutput(output string, nicInfo *NICInfo) {
+	for _, line := range strings.Split(output, "\n") {
+		// 获取 MAC 地址
+		if strings.Contains(line, "ether") {
+			for _, field := range strings.Fields(line) {
+				if strings.Count(field, ":") == 5 {
+					nicInfo.MACAddress = strings.ToLower(field)
+				}
+			}
+		}
+		// 获取速率
+		if strings.Contains(line, "media") && strings.Contains(line, "baseT") {
+			for _, field := range strings.Fields(line) {
+				if strings.HasSuffix(field, "baseT") {
+					speed := strings.TrimSuffix(field, "baseT")
+					if val, err := strconv.Atoi(speed); err == nil {
+						nicInfo.Speed = val
+					}
+				}
+			}
+		}
+	}
+}
+
+// getNICDriverFreeBSD 获取 FreeBSD 网卡驱动
+func (hc *HardwareChecker) getNICDriverFreeBSD(name string) string {
+	// 使用 sysctl 获取驱动信息
+	cmd := exec.Command("sysctl", "-b", "dev."+name+".%driver")
+	output, err := cmd.Output()
+	if err == nil {
+		return strings.TrimSpace(string(output))
+	}
+
+	// 使用 pciconf
+	cmd = exec.Command("pciconf", "-l", "-v")
+	output, err = cmd.Output()
+	if err == nil {
+		for _, line := range strings.Split(string(output), "\n") {
+			if strings.Contains(line, name) && strings.Contains(line, "driver") {
+				if idx := strings.Index(line, "driver="); idx != -1 {
+					return line[idx+7:]
+				}
+			}
+		}
+	}
+
+	return "Unknown"
+}
+
+// countLaggSlaves 计算 lagg 从网卡数量
+func (hc *HardwareChecker) countLaggSlaves(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "laggproto") || strings.Contains(line, "laggport") {
+			count++
+		}
+	}
+	return count
+}
+
 // collectMemoryInfo 收集内存信息
 func (hc *HardwareChecker) collectMemoryInfo() *MemoryInfo {
+	if hc.OSInfo.IsFreeBSD {
+		return hc.collectMemoryInfoFreeBSD()
+	}
+	return hc.collectMemoryInfoLinux()
+}
+
+// collectMemoryInfoLinux 收集 Linux 内存信息
+func (hc *HardwareChecker) collectMemoryInfoLinux() *MemoryInfo {
 	memInfo := &MemoryInfo{
 		MemoryType:  "Unknown",
 		MemorySpeed: 0,
@@ -2290,15 +2931,20 @@ func (hc *HardwareChecker) collectMemoryInfo() *MemoryInfo {
 		memInfo.TotalMemory = ram
 	}
 
-	// 使用 dmidecode 获取内存详细信息
-	if cmd, err := exec.LookPath("dmidecode"); err == nil {
-		output, err := exec.Command(cmd, "-t", "memory", "-q").Output()
+	// ARM64 使用 Device Tree 获取内存信息
+	if hc.OSInfo.Arch == "aarch64" {
+		hc.collectMemoryFromDeviceTree(memInfo)
+	}
+
+	// 使用 dmidecode 获取内存详细信息（需要 root 权限）
+	if utils.CommandExists("dmidecode") && utils.IsRoot() {
+		output, err := exec.Command("dmidecode", "-t", "memory", "-q").Output()
 		if err == nil {
 			hc.parseDmidecodeMemoryOutput(string(output), memInfo)
 		}
 	}
 
-	// 尝试从 /sys/devices/system/edac/mc 获取内存信息
+	// 尝试从 /sys/devices/system/node 获取 NUMA 节点数
 	hc.collectMemoryFromSysfs(memInfo)
 
 	// 如果没有检测到内存插槽数，使用 NUMA 节点数估算
@@ -2312,30 +2958,38 @@ func (hc *HardwareChecker) collectMemoryInfo() *MemoryInfo {
 	return memInfo
 }
 
-// parseDmidecodeMemoryOutput 解析 dmidecode 内存输出
-func (hc *HardwareChecker) parseDmidecodeMemoryOutput(output string, memInfo *MemoryInfo) {
-	lines := strings.Split(output, "\n")
-	slotCount := 0
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Type:") {
-			memType := strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
-			if memType != "" && memType != "Unknown" {
-				memInfo.MemoryType = memType
+// collectMemoryFromDeviceTree 从 Device Tree 收集内存信息（ARM64）
+func (hc *HardwareChecker) collectMemoryFromDeviceTree(memInfo *MemoryInfo) {
+	// 尝试从 /proc/device-tree/memory 读取
+	if data, err := os.ReadFile("/proc/device-tree/memory/device_type"); err == nil {
+		if strings.Contains(string(data), "memory") {
+			// 读取 reg 属性获取内存大小
+			if regData, err := os.ReadFile("/proc/device-tree/memory/reg"); err == nil {
+				// 解析 reg 属性（比较复杂，简化处理）
+				_ = regData
 			}
-		}
-		if strings.HasPrefix(line, "Speed:") {
-			if speed, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Speed:"))); err == nil {
-				if speed > memInfo.MemorySpeed {
-					memInfo.MemorySpeed = speed
-				}
-			}
-		}
-		if strings.Contains(line, "Memory Device") {
-			slotCount++
 		}
 	}
-	memInfo.MemorySlots = slotCount
+
+	// 尝试从 /proc/device-tree/cpus 读取 CPU 信息
+	if data, err := os.ReadFile("/proc/device-tree/cpus/cpu@0/device_type"); err == nil {
+		// ARM CPU 信息
+		_ = data
+	}
+
+	// 从 /sys/devices/system/node 获取 NUMA 节点数
+	entries, err := os.ReadDir("/sys/devices/system/node")
+	if err == nil {
+		count := 0
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "node") {
+				count++
+			}
+		}
+		if count > 0 {
+			memInfo.NUMANodes = count
+		}
+	}
 }
 
 // collectMemoryFromSysfs 从 sysfs 收集内存信息
@@ -2363,6 +3017,85 @@ func (hc *HardwareChecker) collectMemoryFromSysfs(memInfo *MemoryInfo) {
 			memInfo.MemoryType = "DDR3"
 		} else if strings.Contains(content, "DDR5") {
 			memInfo.MemoryType = "DDR5"
+		} else if strings.Contains(content, "LPDDR4") {
+			memInfo.MemoryType = "LPDDR4"
+		} else if strings.Contains(content, "LPDDR5") {
+			memInfo.MemoryType = "LPDDR5"
 		}
 	}
+}
+
+// parseDmidecodeMemoryOutput 解析 dmidecode 内存输出
+func (hc *HardwareChecker) parseDmidecodeMemoryOutput(output string, memInfo *MemoryInfo) {
+	lines := strings.Split(output, "\n")
+	slotCount := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Type:") {
+			memType := strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
+			if memType != "" && memType != "Unknown" {
+				// 处理 "DDR4", "LPDDR4", "LPDDR4X" 等
+				if strings.Contains(memType, "DDR5") {
+					memInfo.MemoryType = "DDR5"
+				} else if strings.Contains(memType, "DDR4") {
+					memInfo.MemoryType = "DDR4"
+				} else if strings.Contains(memType, "DDR3") {
+					memInfo.MemoryType = "DDR3"
+				} else if strings.Contains(memType, "LPDDR5") {
+					memInfo.MemoryType = "LPDDR5"
+				} else if strings.Contains(memType, "LPDDR4") {
+					memInfo.MemoryType = "LPDDR4"
+				} else {
+					memInfo.MemoryType = memType
+				}
+			}
+		}
+		if strings.HasPrefix(line, "Speed:") {
+			if speed, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Speed:"))); err == nil {
+				if speed > memInfo.MemorySpeed {
+					memInfo.MemorySpeed = speed
+				}
+			}
+		}
+		if strings.Contains(line, "Memory Device") && !strings.Contains(line, "No Module Installed") {
+			slotCount++
+		}
+	}
+	memInfo.MemorySlots = slotCount
+}
+
+// collectMemoryInfoFreeBSD 收集 FreeBSD 内存信息
+func (hc *HardwareChecker) collectMemoryInfoFreeBSD() *MemoryInfo {
+	memInfo := &MemoryInfo{
+		MemoryType:  "Unknown",
+		MemorySpeed: 0,
+		MemorySlots: 0,
+	}
+
+	// 获取总内存
+	cmd := exec.Command("sysctl", "hw.physmem")
+	output, err := cmd.Output()
+	if err == nil {
+		line := strings.TrimSpace(string(output))
+		if idx := strings.Index(line, ":"); idx != -1 {
+			physmem, _ := strconv.ParseUint(strings.TrimSpace(line[idx+1:]), 10, 64)
+			memInfo.TotalMemory = physmem
+		}
+	}
+
+	// 使用 dmidecode（如果可用）
+	if utils.CommandExists("dmidecode") {
+		cmd = exec.Command("dmidecode", "-t", "memory", "-q")
+		output, err = cmd.Output()
+		if err == nil {
+			hc.parseDmidecodeMemoryOutput(string(output), memInfo)
+		}
+	}
+
+	// 如果没有检测到内存插槽数，设置为 1
+	if memInfo.MemorySlots == 0 {
+		memInfo.MemorySlots = 1
+	}
+
+	return memInfo
 }
