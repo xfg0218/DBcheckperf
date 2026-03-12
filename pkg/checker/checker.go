@@ -1377,41 +1377,74 @@ func (hc *HardwareChecker) RunRemote(host string) *RemoteHardwareInfo {
 }
 
 // runSSHCommand 通过 SSH 执行远程命令并返回输出（辅助函数）
+// 使用统一的 SSH 选项，确保连接稳定性和安全性
 func runSSHCommand(host string, command string) (string, error) {
+	return runSSHCommandWithTimeout(host, command, 30*time.Second)
+}
+
+// runSSHCommandWithTimeout 通过 SSH 执行远程命令，带超时控制
+func runSSHCommandWithTimeout(host string, command string, timeout time.Duration) (string, error) {
 	cmd := exec.Command("ssh",
-		"-o", "ConnectTimeout=5",
+		"-o", "ConnectTimeout=10",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "BatchMode=yes",
+		"-o", "ServerAliveInterval=30",
+		"-o", "ServerAliveCountMax=3",
 		host, command)
+
+	// 设置命令执行超时
+	if timeout > 0 {
+		cmd.WaitDelay = timeout
+	}
 
 	output, err := cmd.Output()
 	if err != nil {
+		// 区分超时错误和其他错误
+		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "killed") {
+			return "", fmt.Errorf("SSH 命令执行超时（%v）：%v", timeout, err)
+		}
 		return "", fmt.Errorf("SSH 命令执行失败：%v", err)
 	}
 	return string(output), nil
+}
+
+// runSSHCommandQuiet 通过 SSH 执行远程命令，失败时不返回错误（用于可选命令）
+func runSSHCommandQuiet(host string, command string) string {
+	output, _ := runSSHCommand(host, command)
+	return string(output)
 }
 
 // collectRemoteCPUInfo 通过 SSH 收集远程主机 CPU 信息
 func (hc *HardwareChecker) collectRemoteCPUInfo(host string) *CPUInfo {
 	cpuInfo := &CPUInfo{}
 
-	// 使用 SSH 执行 lscpu 命令
-	output, err := runSSHCommand(host, "lscpu")
-	if err == nil {
-		cpuInfo = hc.parseLscpuOutput(string(output))
+	// 方法 1: 使用 lscpu 命令（最完整）
+	output, err := runSSHCommand(host, "lscpu 2>/dev/null")
+	if err == nil && output != "" {
+		cpuInfo = hc.parseLscpuOutput(output)
 	}
 
-	// 如果 lscpu 失败或信息不完整，使用备用方法
+	// 方法 2: 如果 lscpu 失败或信息不完整，使用 /proc/cpuinfo
+	if cpuInfo.Cores == 0 || cpuInfo.Model == "" {
+		output, err = runSSHCommand(host, "cat /proc/cpuinfo")
+		if err == nil {
+			hc.parseProcCPUinfo(output, cpuInfo)
+		}
+	}
+
+	// 方法 3: 使用 nproc 获取核心数（最后备用）
 	if cpuInfo.Cores == 0 {
 		output, err = runSSHCommand(host, "nproc")
 		if err == nil {
-			cores, _ := strconv.Atoi(strings.TrimSpace(string(output)))
+			cores, _ := strconv.Atoi(strings.TrimSpace(output))
 			if cores > 0 {
 				cpuInfo.Cores = cores
 			}
 		}
 	}
+
+	// 设置默认值
 	if cpuInfo.Sockets == 0 {
 		cpuInfo.Sockets = 1
 	}
@@ -1422,17 +1455,87 @@ func (hc *HardwareChecker) collectRemoteCPUInfo(host string) *CPUInfo {
 	return cpuInfo
 }
 
+// parseProcCPUinfo 解析 /proc/cpuinfo 输出
+func (hc *HardwareChecker) parseProcCPUinfo(output string, cpuInfo *CPUInfo) {
+	lines := strings.Split(output, "\n")
+	processorCount := 0
+	physicalIds := make(map[string]bool)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, ":") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		switch key {
+		case "model name", "Model name":
+			if cpuInfo.Model == "" {
+				cpuInfo.Model = value
+			}
+		case "cpu cores":
+			if cpuInfo.Cores == 0 {
+				cpuInfo.Cores, _ = strconv.Atoi(value)
+			}
+		case "physical id":
+			physicalIds[value] = true
+		case "processor":
+			processorCount++
+		}
+	}
+
+	// 如果没有解析到核心数，使用 processor 数量
+	if cpuInfo.Cores == 0 && processorCount > 0 {
+		cpuInfo.Cores = processorCount
+	}
+
+	// 使用 physical id 数量估算 sockets
+	if cpuInfo.Sockets == 0 && len(physicalIds) > 0 {
+		cpuInfo.Sockets = len(physicalIds)
+	}
+}
+
 // collectRemoteDiskInfo 通过 SSH 收集远程主机磁盘信息
 func (hc *HardwareChecker) collectRemoteDiskInfo(host string) []*DiskInfo {
 	var diskInfos []*DiskInfo
 
-	// 使用 SSH 执行 lsblk 命令获取磁盘列表
-	output, err := runSSHCommand(host, "lsblk -nd -o NAME,MODEL,SERIAL,TYPE,SIZE,ROTA --bytes")
-	if err != nil {
-		return diskInfos
+	// 方法 1: 使用 lsblk 命令获取磁盘列表（首选）
+	output, err := runSSHCommand(host, "lsblk -nd -o NAME,MODEL,SERIAL,TYPE,SIZE,ROTA --bytes 2>/dev/null")
+	if err == nil && output != "" {
+		diskInfos = hc.parseRemoteLsblkOutput(output)
+		if len(diskInfos) > 0 {
+			return diskInfos
+		}
 	}
 
-	lines := strings.Split(string(output), "\n")
+	// 方法 2: 使用 fdisk -l 获取磁盘列表（备用）
+	output, err = runSSHCommand(host, "fdisk -l 2>/dev/null")
+	if err == nil && output != "" {
+		diskInfos = hc.parseRemoteFdiskOutput(output)
+		if len(diskInfos) > 0 {
+			return diskInfos
+		}
+	}
+
+	// 方法 3: 使用 smartctl 获取磁盘列表（最后备用）
+	output, err = runSSHCommand(host, "smartctl --scan 2>/dev/null")
+	if err == nil && output != "" {
+		diskInfos = hc.collectRemoteDiskInfoSmartctl(host, output)
+	}
+
+	return diskInfos
+}
+
+// parseRemoteLsblkOutput 解析远程 lsblk 输出
+func (hc *HardwareChecker) parseRemoteLsblkOutput(output string) []*DiskInfo {
+	var diskInfos []*DiskInfo
+
+	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -1490,21 +1593,175 @@ func (hc *HardwareChecker) collectRemoteDiskInfo(host string) []*DiskInfo {
 	return diskInfos
 }
 
+// parseRemoteFdiskOutput 解析远程 fdisk -l 输出
+func (hc *HardwareChecker) parseRemoteFdiskOutput(output string) []*DiskInfo {
+	var diskInfos []*DiskInfo
+
+	// 解析 fdisk 输出中的磁盘信息
+	// 示例：Disk /dev/sda: 500 GB, 500107862016 bytes
+	re := regexp.MustCompile(`Disk\s+(/dev/\S+):\s*(\d+(?:\.\d+)?)\s*(GB|MB|TB|KB)`)
+	matches := re.FindAllStringSubmatch(output, -1)
+
+	for _, match := range matches {
+		if len(match) >= 4 {
+			device := match[1]
+			size := match[2]
+			unit := match[3]
+
+			// 提取磁盘名（如 sda）
+			name := strings.TrimPrefix(device, "/dev/")
+
+			diskInfo := &DiskInfo{
+				Name: name,
+				Type: "Unknown",
+			}
+
+			// 解析大小
+			sizeVal, _ := strconv.ParseFloat(size, 64)
+			var multiplier uint64 = 1
+			switch unit {
+			case "TB":
+				multiplier = 1024 * 1024 * 1024 * 1024
+			case "GB":
+				multiplier = 1024 * 1024 * 1024
+			case "MB":
+				multiplier = 1024 * 1024
+			case "KB":
+				multiplier = 1024
+			}
+			diskInfo.Size = uint64(sizeVal * float64(multiplier))
+
+			// 尝试从型号行提取型号
+			modelRe := regexp.MustCompile(fmt.Sprintf(`%s\s+\S+:\s*(.+?)\s*\n`, device))
+			modelMatch := modelRe.FindStringSubmatch(output)
+			if len(modelMatch) >= 2 {
+				diskInfo.Model = strings.TrimSpace(modelMatch[1])
+				diskInfo.Vendor = hc.extractVendor(diskInfo.Model)
+			}
+
+			if diskInfo.Size > 0 {
+				diskInfos = append(diskInfos, diskInfo)
+			}
+		}
+	}
+
+	return diskInfos
+}
+
+// collectRemoteDiskInfoSmartctl 通过 SSH 使用 smartctl 收集磁盘信息
+func (hc *HardwareChecker) collectRemoteDiskInfoSmartctl(host string, scanOutput string) []*DiskInfo {
+	var diskInfos []*DiskInfo
+
+	// 解析 smartctl --scan 输出
+	lines := strings.Split(scanOutput, "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		device := fields[0]
+		name := strings.TrimPrefix(device, "/dev/")
+
+		// 使用 smartctl -i 获取详细信息
+		output, err := runSSHCommand(host, fmt.Sprintf("smartctl -i %s 2>/dev/null", device))
+		if err != nil {
+			continue
+		}
+
+		diskInfo := &DiskInfo{
+			Name: name,
+			Type: "Unknown",
+		}
+
+		// 解析 smartctl 输出
+		for _, smartLine := range strings.Split(output, "\n") {
+			if strings.HasPrefix(smartLine, "Device Model:") || strings.HasPrefix(smartLine, "Model Number:") {
+				parts := strings.SplitN(smartLine, ":", 2)
+				if len(parts) == 2 {
+					diskInfo.Model = strings.TrimSpace(parts[1])
+					diskInfo.Vendor = hc.extractVendor(diskInfo.Model)
+				}
+			}
+			if strings.HasPrefix(smartLine, "User Capacity:") {
+				// 解析 "User Capacity: 500,107,862,016 bytes [500 GB]"
+				if idx := strings.Index(smartLine, "bytes"); idx != -1 {
+					sizeStr := strings.TrimSpace(smartLine[:idx])
+					if idx2 := strings.LastIndex(sizeStr, " "); idx2 != -1 {
+						sizeStr = sizeStr[idx2+1:]
+						sizeStr = strings.ReplaceAll(sizeStr, ",", "")
+						size, _ := strconv.ParseUint(sizeStr, 10, 64)
+						diskInfo.Size = size
+					}
+				}
+			}
+			if strings.HasPrefix(smartLine, "Rotation Rate:") {
+				if strings.Contains(smartLine, "Solid State Device") {
+					diskInfo.Type = "SSD"
+					diskInfo.Rotational = false
+				} else if strings.Contains(smartLine, "rpm") {
+					diskInfo.Type = "HDD"
+					diskInfo.Rotational = true
+				} else {
+					diskInfo.Type = "SSD"
+					diskInfo.Rotational = false
+				}
+			}
+		}
+
+		// NVMe 特殊处理
+		if strings.HasPrefix(name, "nvme") {
+			diskInfo.Type = "NVMe"
+		}
+
+		if diskInfo.Size > 0 {
+			diskInfos = append(diskInfos, diskInfo)
+		}
+	}
+
+	return diskInfos
+}
+
 // collectRemoteRAIDInfo 通过 SSH 收集远程主机 RAID 信息
 func (hc *HardwareChecker) collectRemoteRAIDInfo(host string) *RAIDConfigInfo {
 	info := &RAIDConfigInfo{
 		StripeSize: 64, // 默认条带大小
 	}
 
-	// 使用 SSH 执行 lspci 检测 RAID 卡
-	output, err := runSSHCommand(host, "lspci")
+	// 方法 1: 使用 lspci 检测 RAID 卡
+	output, err := runSSHCommand(host, "lspci 2>/dev/null")
 	if err == nil {
-		hc.parseLspciForRAID(string(output), info)
+		hc.parseLspciForRAID(output, info)
 	}
 
-	// 检查软件 RAID
-	output, err = runSSHCommand(host, "cat /proc/mdstat")
-	if err == nil && strings.Contains(string(output), "active") {
+	// 方法 2: 使用 megacli 获取 RAID 信息（LSI/Broadcom）
+	if output := runSSHCommandQuiet(host, "which megacli"); strings.TrimSpace(output) != "" {
+		hc.collectRemoteRAIDInfoMegacli(host, info)
+	}
+
+	// 方法 3: 使用 storcli 获取 RAID 信息（LSI/Broadcom）
+	if output := runSSHCommandQuiet(host, "which storcli"); strings.TrimSpace(output) != "" {
+		hc.collectRemoteRAIDInfoStorcli(host, info)
+	}
+
+	// 方法 4: 使用 perccli 获取 RAID 信息（Dell PERC）
+	if output := runSSHCommandQuiet(host, "which perccli"); strings.TrimSpace(output) != "" {
+		hc.collectRemoteRAIDInfoPerccli(host, info)
+	}
+
+	// 方法 5: 使用 ssacli/hpssacli 获取 RAID 信息（HP SmartArray）
+	if output := runSSHCommandQuiet(host, "which ssacli"); strings.TrimSpace(output) != "" {
+		hc.collectRemoteRAIDInfoSsacli(host, info, "ssacli")
+	} else if output := runSSHCommandQuiet(host, "which hpssacli"); strings.TrimSpace(output) != "" {
+		hc.collectRemoteRAIDInfoSsacli(host, info, "hpssacli")
+	}
+
+	// 方法 6: 检查软件 RAID
+	output, err = runSSHCommand(host, "cat /proc/mdstat 2>/dev/null")
+	if err == nil && strings.Contains(output, "active") {
 		info.HasRAID = true
 		if info.RAIDModel == "" {
 			info.RAIDModel = "Linux Software RAID (mdraid)"
@@ -1513,6 +1770,101 @@ func (hc *HardwareChecker) collectRemoteRAIDInfo(host string) *RAIDConfigInfo {
 	}
 
 	return info
+}
+
+// collectRemoteRAIDInfoMegacli 通过 SSH 使用 megacli 收集 RAID 信息
+func (hc *HardwareChecker) collectRemoteRAIDInfoMegacli(host string, info *RAIDConfigInfo) {
+	output, err := runSSHCommand(host, "megacli adpallinfo -aALL 2>/dev/null")
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Product Name") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				info.RAIDModel = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.Contains(line, "BBU") && strings.Contains(line, "Present") {
+			info.BatteryBackup = true
+		}
+		if strings.Contains(line, "Stripe Size") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				size := strings.TrimSpace(parts[1])
+				if strings.Contains(size, "KB") {
+					size = strings.ReplaceAll(size, "KB", "")
+					size = strings.TrimSpace(size)
+					if val, err := strconv.Atoi(size); err == nil {
+						info.StripeSize = val
+					}
+				}
+			}
+		}
+	}
+}
+
+// collectRemoteRAIDInfoStorcli 通过 SSH 使用 storcli 收集 RAID 信息
+func (hc *HardwareChecker) collectRemoteRAIDInfoStorcli(host string, info *RAIDConfigInfo) {
+	output, err := runSSHCommand(host, "storcli /c0 show all 2>/dev/null")
+	if err != nil {
+		return
+	}
+
+	if strings.Contains(output, "RAID Level") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "Broadcom/LSI MegaRAID"
+		}
+		// 解析 RAID 级别
+		for _, line := range strings.Split(output, "\n") {
+			if strings.Contains(line, "RAID Level") {
+				if strings.Contains(line, "RAID0") {
+					info.RAIDLevel = "RAID 0"
+				} else if strings.Contains(line, "RAID1") {
+					info.RAIDLevel = "RAID 1"
+				} else if strings.Contains(line, "RAID5") {
+					info.RAIDLevel = "RAID 5"
+				} else if strings.Contains(line, "RAID6") {
+					info.RAIDLevel = "RAID 6"
+				} else if strings.Contains(line, "RAID10") {
+					info.RAIDLevel = "RAID 10"
+				}
+			}
+		}
+	}
+}
+
+// collectRemoteRAIDInfoPerccli 通过 SSH 使用 perccli 收集 RAID 信息
+func (hc *HardwareChecker) collectRemoteRAIDInfoPerccli(host string, info *RAIDConfigInfo) {
+	output, err := runSSHCommand(host, "perccli /c0 show all 2>/dev/null")
+	if err != nil {
+		return
+	}
+
+	if strings.Contains(output, "RAID Level") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "Dell PERC"
+		}
+	}
+}
+
+// collectRemoteRAIDInfoSsacli 通过 SSH 使用 ssacli/hpssacli 收集 RAID 信息
+func (hc *HardwareChecker) collectRemoteRAIDInfoSsacli(host string, info *RAIDConfigInfo, cmdName string) {
+	output, err := runSSHCommand(host, fmt.Sprintf("%s controller all show config 2>/dev/null", cmdName))
+	if err != nil {
+		return
+	}
+
+	if strings.Contains(output, "RAID") {
+		info.HasRAID = true
+		if info.RAIDModel == "" {
+			info.RAIDModel = "HP SmartArray"
+		}
+	}
 }
 
 // collectRemoteNICInfo 通过 SSH 收集远程主机网卡信息
@@ -1630,10 +1982,10 @@ func (hc *HardwareChecker) collectRemoteMemoryInfo(host string) *MemoryInfo {
 		MemorySlots: 0,
 	}
 
-	// 使用 SSH 执行 free 命令获取总内存
-	output, err := runSSHCommand(host, "free -b")
+	// 方法 1: 使用 free 命令获取总内存
+	output, err := runSSHCommand(host, "free -b 2>/dev/null")
 	if err == nil {
-		lines := strings.Split(string(output), "\n")
+		lines := strings.Split(output, "\n")
 		for _, line := range lines {
 			if strings.HasPrefix(line, "Mem:") {
 				fields := strings.Fields(line)
@@ -1646,10 +1998,13 @@ func (hc *HardwareChecker) collectRemoteMemoryInfo(host string) *MemoryInfo {
 		}
 	}
 
-	// 尝试从 /sys/devices/system/node 获取 NUMA 节点数
-	nodeOutput, err := runSSHCommand(host, "ls -d /sys/devices/system/node/node*")
+	// 方法 2: 尝试使用 dmidecode 获取内存详细信息（需要 root 权限）
+	hc.collectRemoteMemoryInfoDmidecode(host, memInfo)
+
+	// 方法 3: 尝试从 /sys/devices/system/node 获取 NUMA 节点数
+	nodeOutput, err := runSSHCommand(host, "ls -d /sys/devices/system/node/node* 2>/dev/null")
 	if err == nil {
-		nodes := strings.Fields(string(nodeOutput))
+		nodes := strings.Fields(nodeOutput)
 		memInfo.NUMANodes = len(nodes)
 		if memInfo.NUMANodes == 0 {
 			memInfo.NUMANodes = 1
@@ -1658,10 +2013,29 @@ func (hc *HardwareChecker) collectRemoteMemoryInfo(host string) *MemoryInfo {
 		memInfo.NUMANodes = 1
 	}
 
-	// 内存插槽数使用 NUMA 节点数估算
-	memInfo.MemorySlots = memInfo.NUMANodes
+	// 内存插槽数使用 NUMA 节点数估算（如果没有通过 dmidecode 获取到）
+	if memInfo.MemorySlots == 0 {
+		memInfo.MemorySlots = memInfo.NUMANodes
+	}
 
 	return memInfo
+}
+
+// collectRemoteMemoryInfoDmidecode 通过 SSH 使用 dmidecode 收集内存详细信息
+func (hc *HardwareChecker) collectRemoteMemoryInfoDmidecode(host string, memInfo *MemoryInfo) {
+	// 检查 dmidecode 是否存在
+	output, err := runSSHCommand(host, "which dmidecode 2>/dev/null")
+	if err != nil || strings.TrimSpace(output) == "" {
+		return
+	}
+
+	// 执行 dmidecode 获取内存信息
+	output, err = runSSHCommand(host, "dmidecode -t memory -q 2>/dev/null")
+	if err != nil {
+		return
+	}
+
+	hc.parseDmidecodeMemoryOutput(output, memInfo)
 }
 
 // parseSizeString 解析带单位的大小字符串（如 500G, 1T, 500M）
