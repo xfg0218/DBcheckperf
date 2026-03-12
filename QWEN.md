@@ -168,11 +168,11 @@ go build -o dbcheckperf ./cmd/main.go
    - `pkg/reporter`: 报告输出逻辑
    - `pkg/utils`: 通用工具函数
 3. **错误处理**: 使用 error 返回值，重要错误打印到 stderr
-4. **命名**: 使用 Go 标准命名约定（驼峰式）
+4. **命名**: 使用 Go 标准命名约定
 
 ## 依赖
 
-- Go 1.21+
+- Go 1.24+
 - 无外部依赖（仅使用标准库）
 
 ## 相关文件

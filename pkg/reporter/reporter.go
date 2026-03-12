@@ -554,22 +554,21 @@ func (r *Reporter) PrintVerbose(format string, args ...interface{}) {
 // PrintHardwareResults 打印硬件信息表格
 func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 	fmt.Println()
-	fmt.Println("====================")
-	fmt.Println("==  硬件信息")
-	fmt.Println("====================")
+	fmt.Println("╔════════════════════════════════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                                    硬 件 信 息 报 告                                       ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
 	// CPU 信息表格
-	fmt.Println("--- CPU 信息 ---")
-	fmt.Println()
-	cpuHeader := fmt.Sprintf("%-15s %-40s %-8s %-8s %-12s %-12s %-10s",
-		"主机名", "CPU 型号", "核心数", "插槽数", "基准频率", "睿频", "NUMA 节点")
-	fmt.Println(cpuHeader)
-	fmt.Println(strings.Repeat("-", 115))
+	fmt.Println("┌────────────────────────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  📌 CPU 信息                                                                               │")
+	fmt.Println("├───────────────┬──────────────────────┬──────────┬──────────┬────────────┬─────────────────┤")
+	fmt.Println("│     主机名     │       CPU 型号        │  核心数   │  插槽数   │   基准频率   │      睿频        │")
+	fmt.Println("├───────────────┼──────────────────────┼──────────┼──────────┼────────────┼─────────────────┤")
 
 	cpuModel := info.CPUInfo.Model
-	if len(cpuModel) > 38 {
-		cpuModel = cpuModel[:35] + "..."
+	if len(cpuModel) > 20 {
+		cpuModel = cpuModel[:17] + "..."
 	}
 	baseFreqStr := "-"
 	if info.CPUInfo.BaseFreq > 0 {
@@ -579,24 +578,23 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 	if info.CPUInfo.TurboFreq > 0 {
 		turboFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.TurboFreq)
 	}
-	cpuRow := fmt.Sprintf("%-15s %-40s %-8d %-8d %-12s %-12s %-10d",
+	cpuRow := fmt.Sprintf("│ %-13s │ %-20s │ %-8d │ %-8d │ %-10s │ %-15s │",
 		info.Host,
 		cpuModel,
 		info.CPUInfo.Cores,
 		info.CPUInfo.Sockets,
 		baseFreqStr,
-		turboFreqStr,
-		info.CPUInfo.NUMANodes)
+		turboFreqStr)
 	fmt.Println(cpuRow)
+	fmt.Println("└───────────────┴──────────────────────┴──────────┴──────────┴────────────┴─────────────────┘")
 	fmt.Println()
 
 	// 内存信息表格
-	fmt.Println("--- 内存信息 ---")
-	fmt.Println()
-	memHeader := fmt.Sprintf("%-15s %-15s %-15s %-12s %-12s",
-		"主机名", "总内存", "内存类型", "内存速度", "插槽数")
-	fmt.Println(memHeader)
-	fmt.Println(strings.Repeat("-", 75))
+	fmt.Println("┌────────────────────────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  📌 内存信息                                                                               │")
+	fmt.Println("├───────────────┬────────────────┬────────────────┬────────────────┬────────────────────────┤")
+	fmt.Println("│     主机名     │    总内存       │    内存类型     │    内存速度     │       插槽数            │")
+	fmt.Println("├───────────────┼────────────────┼────────────────┼────────────────┼────────────────────────┤")
 
 	memType := info.MemoryInfo.MemoryType
 	if memType == "" || memType == "Unknown" {
@@ -606,30 +604,30 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 	if info.MemoryInfo.MemorySpeed > 0 {
 		memSpeedStr = fmt.Sprintf("%d MHz", info.MemoryInfo.MemorySpeed)
 	}
-	memRow := fmt.Sprintf("%-15s %-15s %-15s %-12s %-12d",
+	memRow := fmt.Sprintf("│ %-13s │ %-14s │ %-14s │ %-14s │ %-22d │",
 		info.Host,
 		utils.FormatBytes(info.MemoryInfo.TotalMemory),
 		memType,
 		memSpeedStr,
 		info.MemoryInfo.MemorySlots)
 	fmt.Println(memRow)
+	fmt.Println("└───────────────┴────────────────┴────────────────┴────────────────┴────────────────────────┘")
 	fmt.Println()
 
 	// 磁盘信息表格
-	fmt.Println("--- 磁盘信息 ---")
-	fmt.Println()
-	diskHeader := fmt.Sprintf("%-10s %-30s %-15s %-10s %-12s %-8s",
-		"设备名", "型号", "厂家", "类型", "大小", "旋转")
-	fmt.Println(diskHeader)
-	fmt.Println(strings.Repeat("-", 95))
+	fmt.Println("┌────────────────────────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  📌 磁盘信息                                                                               │")
+	fmt.Println("├────────────┬─────────────────────────────┬──────────────┬──────────┬───────────┬──────────┤")
+	fmt.Println("│   设备名    │          型号               │     厂家      │   类型    │    大小    │  旋转   │")
+	fmt.Println("├────────────┼─────────────────────────────┼──────────────┼──────────┼───────────┼──────────┤")
 
 	if len(info.DiskInfos) == 0 {
-		fmt.Println("未检测到物理磁盘")
+		fmt.Println("│                                        未检测到物理磁盘                                  │")
 	} else {
 		for _, disk := range info.DiskInfos {
 			model := disk.Model
-			if len(model) > 28 {
-				model = model[:25] + "..."
+			if len(model) > 27 {
+				model = model[:24] + "..."
 			}
 			vendor := disk.Vendor
 			if vendor == "" {
@@ -639,7 +637,7 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 			if disk.Rotational {
 				rotational = "是"
 			}
-			diskRow := fmt.Sprintf("%-10s %-30s %-15s %-10s %-12s %-8s",
+			diskRow := fmt.Sprintf("│ %-10s │ %-27s │ %-12s │ %-8s │ %-9s │ %-8s │",
 				disk.Name,
 				model,
 				vendor,
@@ -649,15 +647,15 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 			fmt.Println(diskRow)
 		}
 	}
+	fmt.Println("└────────────┴─────────────────────────────┴──────────────┴──────────┴───────────┴──────────┘")
 	fmt.Println()
 
 	// RAID 信息表格
-	fmt.Println("--- RAID 信息 ---")
-	fmt.Println()
-	raidHeader := fmt.Sprintf("%-10s %-35s %-12s %-12s %-12s %-12s",
-		"状态", "RAID 卡型号", "缓存大小", "条带大小", "RAID 级别", "电池备份")
-	fmt.Println(raidHeader)
-	fmt.Println(strings.Repeat("-", 105))
+	fmt.Println("┌────────────────────────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  📌 RAID 信息                                                                              │")
+	fmt.Println("├──────────────┬──────────────────────────┬──────────────┬──────────────┬───────────┬───────┤")
+	fmt.Println("│     状态      │       RAID 卡型号         │   缓存大小    │   条带大小    │ RAID 级别  │ 电池  │")
+	fmt.Println("├──────────────┼──────────────────────────┼──────────────┼──────────────┼───────────┼───────┤")
 
 	raidStatus := "未检测到"
 	raidModel := "-"
@@ -670,8 +668,8 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 		raidStatus = "已检测"
 		if info.RAIDInfo.RAIDModel != "" {
 			raidModel = info.RAIDInfo.RAIDModel
-			if len(raidModel) > 33 {
-				raidModel = raidModel[:30] + "..."
+			if len(raidModel) > 24 {
+				raidModel = raidModel[:21] + "..."
 			}
 		}
 		if info.RAIDInfo.CacheSize > 0 {
@@ -687,7 +685,7 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 		}
 	}
 
-	raidRow := fmt.Sprintf("%-10s %-35s %-12s %-12s %-12s %-12s",
+	raidRow := fmt.Sprintf("│ %-12s │ %-24s │ %-12s │ %-12s │ %-9s │ %-5s │",
 		raidStatus,
 		raidModel,
 		raidCache,
@@ -695,18 +693,18 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 		raidLevel,
 		batteryBackup)
 	fmt.Println(raidRow)
+	fmt.Println("└──────────────┴──────────────────────────┴──────────────┴──────────────┴───────────┴───────┘")
 	fmt.Println()
 
 	// 网卡信息表格
-	fmt.Println("--- 网卡信息 ---")
-	fmt.Println()
-	nicHeader := fmt.Sprintf("%-10s %-12s %-8s %-8s %-8s %-10s %-12s %-20s",
-		"设备名", "速率", "MTU", "队列", "绑定", "绑定模式", "驱动", "MAC 地址")
-	fmt.Println(nicHeader)
-	fmt.Println(strings.Repeat("-", 100))
+	fmt.Println("┌────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  📌 网卡信息                                                                                       │")
+	fmt.Println("├────────────┬──────────────┬─────────┬─────────┬─────────┬────────────┬────────────┬───────────────┤")
+	fmt.Println("│   设备名    │     速率      │   MTU   │  队列   │  绑定   │  绑定模式   │    驱动     │   MAC 地址     │")
+	fmt.Println("├────────────┼──────────────┼─────────┼─────────┼─────────┼────────────┼────────────┼───────────────┤")
 
 	if len(info.NICInfos) == 0 {
-		fmt.Println("未检测到网卡")
+		fmt.Println("│                                            未检测到网卡                                              │")
 	} else {
 		for _, nic := range info.NICInfos {
 			speedStr := fmt.Sprintf("%d Mbps", nic.Speed)
@@ -718,8 +716,8 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 			if nic.IsBond {
 				bondStatus = "是"
 				bondMode = nic.BondMode
-				if len(bondMode) > 8 {
-					bondMode = bondMode[:5] + "..."
+				if len(bondMode) > 10 {
+					bondMode = bondMode[:7] + "..."
 				}
 			}
 			driver := nic.Driver
@@ -727,10 +725,10 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 				driver = driver[:7] + "..."
 			}
 			macAddr := nic.MACAddress
-			if len(macAddr) > 18 {
-				macAddr = macAddr[:15] + "..."
+			if len(macAddr) > 13 {
+				macAddr = macAddr[:10] + "..."
 			}
-			nicRow := fmt.Sprintf("%-10s %-12s %-8d %-8d %-8s %-10s %-12s %-20s",
+			nicRow := fmt.Sprintf("│ %-10s │ %-12s │ %-7d │ %-7d │ %-7s │ %-10s │ %-10s │ %-13s │",
 				nic.Name,
 				speedStr,
 				nic.MTU,
@@ -742,5 +740,6 @@ func (r *Reporter) PrintHardwareResults(info *checker.HardwareInfo) {
 			fmt.Println(nicRow)
 		}
 	}
+	fmt.Println("└────────────┴──────────────┴─────────┴─────────┴─────────┴────────────┴────────────┴───────────────┘")
 	fmt.Println()
 }
