@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -117,7 +119,7 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 	var err error
 
 	// 生成测试文件名
-	testFile := fmt.Sprintf("%s/dd_test_%d", dir, time.Now().UnixNano())
+	testFile := filepath.Join(dir, fmt.Sprintf("dd_test_%d", time.Now().UnixNano()))
 
 	if dc.Verbose {
 		fmt.Printf("磁盘测试：%s\n", testFile)
@@ -173,7 +175,7 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 	// 将主机名解析为 IP 地址
 	resolvedHost := resolveToIP(host)
-	
+
 	result := &DiskResult{
 		Host: resolvedHost,
 		Dir:  dir,
@@ -202,7 +204,7 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 	}
 
 	// 生成测试文件名
-	testFile := fmt.Sprintf("%s/dd_test_%d", dir, time.Now().UnixNano())
+	testFile := path.Join(dir, fmt.Sprintf("dd_test_%d", time.Now().UnixNano()))
 
 	if dc.Verbose {
 		fmt.Printf("远程磁盘测试：%s@%s\n", testFile, host)
@@ -640,14 +642,14 @@ func ResolveToIP(host string) string {
 		// 解析失败，返回原始值
 		return host
 	}
-	
+
 	// 返回第一个 IPv4 地址
 	for _, ip := range ips {
 		if ipv4 := ip.To4(); ipv4 != nil {
 			return ipv4.String()
 		}
 	}
-	
+
 	// 如果没有 IPv4 地址，返回第一个 IP
 	return ips[0].String()
 }
@@ -1360,7 +1362,7 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 func (hc *HardwareChecker) RunRemote(host string) *RemoteHardwareInfo {
 	// 将主机名解析为 IP 地址
 	resolvedHost := resolveToIP(host)
-	
+
 	result := &RemoteHardwareInfo{
 		Host: resolvedHost,
 	}
