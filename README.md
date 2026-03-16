@@ -287,8 +287,8 @@ Test Item              Average              Min                  Max            
 ---------------------------------------------------------------------------------------------------
 Sequential Write       2872.06 MB/s        2872.06 MB/s        2872.06 MB/s        1 test              
 Sequential Read        3408.01 MB/s        3408.01 MB/s        3408.01 MB/s        1 test              
-Random Write (4K)      35.64 MB/s          35.64 MB/s          35.64 MB/s          1 test              
-Random Read (4K)       50.35 MB/s          50.35 MB/s          50.35 MB/s          1 test              
+Random Write           35.64 MB/s          35.64 MB/s          35.64 MB/s          1 test
+Random Read            50.35 MB/s          50.35 MB/s          50.35 MB/s          1 test
 Memory Bandwidth       181397.02 MB/s      181397.02 MB/s      181397.02 MB/s      1 test              
 Network Bandwidth      110.56 MB/s         110.56 MB/s         110.56 MB/s         1 test              
 ```

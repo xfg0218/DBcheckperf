@@ -520,7 +520,7 @@ func (r *Reporter) printTestSummaryTable(diskResults []*checker.DiskResult, stre
 	// 随机写入
 	if len(diskResults) > 0 {
 		randWriteAgg := checker.AggregateDiskRandResults(diskResults, true)
-		randLabel := fmt.Sprintf("随机写入 (%dK)", r.getRandBlockSize())
+		randLabel := fmt.Sprintf("随机写入")
 		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
 			randLabel,
 			utils.FormatBandwidth(randWriteAgg.AvgValue),
@@ -533,7 +533,7 @@ func (r *Reporter) printTestSummaryTable(diskResults []*checker.DiskResult, stre
 	// 随机读取
 	if len(diskResults) > 0 {
 		randReadAgg := checker.AggregateDiskRandResults(diskResults, false)
-		randLabel := fmt.Sprintf("随机读取 (%dK)", r.getRandBlockSize())
+		randLabel := fmt.Sprintf("随机读取")
 		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
 			randLabel,
 			utils.FormatBandwidth(randReadAgg.AvgValue),
