@@ -49,8 +49,7 @@ func main() {
 	// 打印开始信息
 	if cfg.Verbose {
 		fmt.Println("========================================")
-		fmt.Println("dbcheckperf - 数据库性能检查工具")
-		fmt.Printf("版本：%s\n", Version)
+		fmt.Println("dbcheckperf - 服务器性能测试工具")
 		fmt.Println("========================================")
 		fmt.Println()
 	}
