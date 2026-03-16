@@ -5,6 +5,7 @@ package utils
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -132,6 +133,15 @@ func DirExists(path string) bool {
 // EnsureDir 确保目录存在，如果不存在则创建
 func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0755)
+}
+
+// NormalizeDirPath 规范化目录路径，去除多余分隔符和末尾斜杠
+func NormalizeDirPath(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Clean(dir)
 }
 
 // ReadHostFile 从主机文件读取主机列表
