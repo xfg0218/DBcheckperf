@@ -167,8 +167,11 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 // 参数 dir: 远程主机上的测试目录
 // 返回：包含远程主机磁盘测试结果的 DiskResult 结构体
 func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
+	// 将主机名解析为 IP 地址
+	resolvedHost := resolveToIP(host)
+	
 	result := &DiskResult{
-		Host: host,
+		Host: resolvedHost,
 		Dir:  dir,
 	}
 
@@ -623,6 +626,33 @@ func (dc *DiskChecker) runRandomRead(testFile string, blockSize, count int, file
 	return uint64(totalBytes), nil
 }
 
+// ResolveToIP 将主机名解析为 IP 地址
+// 如果已经是 IP 地址或解析失败，返回原始值
+// 导出版本，供外部包使用
+func ResolveToIP(host string) string {
+	// 尝试解析为主机名
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		// 解析失败，返回原始值
+		return host
+	}
+	
+	// 返回第一个 IPv4 地址
+	for _, ip := range ips {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return ipv4.String()
+		}
+	}
+	
+	// 如果没有 IPv4 地址，返回第一个 IP
+	return ips[0].String()
+}
+
+// resolveToIP 将主机名解析为 IP 地址（内部使用）
+func resolveToIP(host string) string {
+	return ResolveToIP(host)
+}
+
 // getHostname 获取本地主机名
 func getHostname() string {
 	name, err := os.Hostname()
@@ -674,13 +704,18 @@ func NewNetworkChecker(duration time.Duration, bufferSizeKB int, useNetperf, ver
 func (nc *NetworkChecker) RunParallel(localHost string, remoteHosts []string) ([]NetworkResult, error) {
 	var results []NetworkResult
 
+	// 将本地主机名解析为 IP
+	resolvedLocal := resolveToIP(localHost)
+
 	// 为每个远程主机启动测试
 	done := make(chan NetworkResult, len(remoteHosts))
 	errChan := make(chan error, len(remoteHosts))
 
 	for _, remote := range remoteHosts {
 		go func(dest string) {
-			result, err := nc.testSingle(localHost, dest)
+			// 将远程主机名解析为 IP
+			resolvedDest := resolveToIP(dest)
+			result, err := nc.testSingle(resolvedLocal, resolvedDest)
 			if err != nil {
 				errChan <- err
 			} else {
@@ -1319,8 +1354,11 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 // 返回：包含远程主机硬件信息的 RemoteHardwareInfo 结构体
 // 注意：此方法不依赖远程主机上的 dbcheckperf 命令，直接通过 SSH 执行底层硬件收集命令
 func (hc *HardwareChecker) RunRemote(host string) *RemoteHardwareInfo {
+	// 将主机名解析为 IP 地址
+	resolvedHost := resolveToIP(host)
+	
 	result := &RemoteHardwareInfo{
-		Host: host,
+		Host: resolvedHost,
 	}
 
 	// 测试 SSH 连接是否可用（使用标准 SSH 选项）

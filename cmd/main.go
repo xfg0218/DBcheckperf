@@ -122,6 +122,8 @@ func main() {
 						// 本地主机，直接运行
 						diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
 						result, err = diskChecker.Run(dir)
+						// 本地测试结果也使用 IP 地址
+						result.Host = checker.ResolveToIP(result.Host)
 					} else {
 						// 远程主机，通过 SSH 运行
 						diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
@@ -448,7 +450,7 @@ func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
 		}
 		if hardwareInfo != nil {
 			remoteInfo := &checker.RemoteHardwareInfo{
-				Host:         hardwareInfo.Host,
+				Host:         checker.ResolveToIP(hardwareInfo.Host),
 				HardwareInfo: hardwareInfo,
 			}
 			rep.PrintHardwareResults([]*checker.RemoteHardwareInfo{remoteInfo})
@@ -478,7 +480,7 @@ func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
 				continue
 			}
 			remoteHardwareInfos = append(remoteHardwareInfos, &checker.RemoteHardwareInfo{
-				Host:         host,
+				Host:         checker.ResolveToIP(host),
 				HardwareInfo: hardwareInfo,
 			})
 		} else {
