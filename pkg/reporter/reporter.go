@@ -240,7 +240,7 @@ func (r *Reporter) PrintDiskResults(results []*checker.DiskResult, writeAgg, rea
 func (r *Reporter) printSeqDiskTable(results []*checker.DiskResult, write bool) {
 	// 打印表头
 	header := fmt.Sprintf("%-20s %-15s %-15s %-15s",
-		"主机名", "时间 (秒)", "数据量", "带宽 (MB/s)")
+		"主机名", "时间 (秒)", "数据量", "速度 (MB/s)")
 	fmt.Println(header)
 	fmt.Println(strings.Repeat("-", 65))
 
@@ -273,7 +273,7 @@ func (r *Reporter) printSeqDiskTable(results []*checker.DiskResult, write bool) 
 func (r *Reporter) printRandDiskTable(results []*checker.DiskResult, write bool) {
 	// 打印表头
 	header := fmt.Sprintf("%-20s %-15s %-15s %-15s",
-		"主机名", "时间 (秒)", "数据量", "带宽 (MB/s)")
+		"主机名", "时间 (秒)", "数据量", "速度 (MB/s)")
 	fmt.Println(header)
 	fmt.Println(strings.Repeat("-", 65))
 
