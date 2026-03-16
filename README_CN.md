@@ -133,6 +133,46 @@ dbcheckperf -r H -v
 dbcheckperf -h localhost -d /tmp -r d --random-bs 8 -v
 ```
 
+### 示例 9: 使用大块大小测试 SSD/NVMe
+
+```bash
+dbcheckperf -h localhost -d /data/nvme -B 256k -S 10GB -r d -v
+```
+
+使用 256KB 块大小测试顺序和随机 I/O 性能，适用于高性能 NVMe SSD。
+
+### 示例 10: 多主机磁盘测试并显示详细输出
+
+```bash
+dbcheckperf -h server1 -h server2 -h server3 -d /data -r d -D -v
+```
+
+在 3 台主机上运行磁盘 I/O 测试，并显示每台主机的详细结果。
+
+### 示例 11: 延长网络测试时间
+
+```bash
+dbcheckperf -f hosts.txt -r n -d /tmp --duration 60s -v
+```
+
+运行 60 秒串行网络测试，获得更准确的结果。
+
+### 示例 12: 组合磁盘、内存和网络测试
+
+```bash
+dbcheckperf -f hosts.txt -d /data -r dsN -D -v
+```
+
+在所有主机上运行磁盘 I/O、内存带宽和并行网络测试。
+
+### 示例 13: 收集所有主机的硬件清单
+
+```bash
+dbcheckperf -f hosts.txt -r H -v
+```
+
+收集所有主机的详细硬件信息，包括 CPU、磁盘、RAID、网卡和内存详情。
+
 这将显示：
 - **CPU 信息**: 型号、核心数、插槽数、基准频率、睿频、NUMA 节点数
 - **磁盘信息**: 设备名、型号、厂家、类型 (HDD/SSD/NVMe)、大小、是否旋转

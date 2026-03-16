@@ -133,6 +133,46 @@ dbcheckperf -r H -v
 dbcheckperf -h localhost -d /tmp -r d --random-bs 8 -v
 ```
 
+### Example 9: Test with Large Block Size for SSD/NVMe
+
+```bash
+dbcheckperf -h localhost -d /data/nvme -B 256k -S 10GB -r d -v
+```
+
+This tests sequential and random I/O with 256KB block size, suitable for high-performance NVMe SSDs.
+
+### Example 10: Multi-Host Disk Test with Detailed Output
+
+```bash
+dbcheckperf -h server1 -h server2 -h server3 -d /data -r d -D -v
+```
+
+This runs disk I/O tests on 3 hosts and displays detailed results for each host.
+
+### Example 11: Network Test with Extended Duration
+
+```bash
+dbcheckperf -f hosts.txt -r n -d /tmp --duration 60s -v
+```
+
+This runs a 60-second serial network test for more accurate results.
+
+### Example 12: Combined Disk, Memory, and Network Test
+
+```bash
+dbcheckperf -f hosts.txt -d /data -r dsN -D -v
+```
+
+This runs disk I/O, memory bandwidth, and parallel network tests on all hosts.
+
+### Example 13: Hardware Inventory for All Hosts
+
+```bash
+dbcheckperf -f hosts.txt -r H -v
+```
+
+This collects detailed hardware information from all hosts including CPU, disk, RAID, NIC, and memory details.
+
 This will display:
 - **CPU Information**: Model, cores, sockets, base frequency, turbo frequency, NUMA nodes
 - **Disk Information**: Device name, model, vendor, type (HDD/SSD/NVMe), size, rotational
