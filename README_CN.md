@@ -6,8 +6,8 @@ dbcheckperf 是一个用 Go 语言编写的数据库性能检查工具，基于 
 
 ## 功能特性
 
-- **磁盘 I/O 测试**: 使用 `dd` 命令测试顺序读写性能，单次测试快速完成，使用 `oflag=direct` 和 `conv=fsync` 确保测试准确性
-- **随机读写测试**: 支持 4K 随机读写性能测试，使用 `dd` 命令配合 `seek/skip` 参数进行随机位置读写
+- **磁盘 I/O 测试**: 使用 `dd` 命令测试顺序和随机读写性能，单次测试快速完成，使用 `oflag=direct` 和 `conv=fsync` 确保测试准确性
+- **随机读写测试**: 默认 4K 随机读写性能测试，使用 `dd` 命令配合 `seek/skip` 参数进行随机位置读写，100 次迭代快速完成
 - **内存带宽测试**: 使用 STREAM 基准测试方法（Go 实现），实际执行 Copy/Scale/Add/Triad 内存操作测试
 - **网络性能测试**: 支持 iperf3/netperf/curl/TCP 流多种测试方法，自动选择最佳测试工具
 - **硬件信息收集**: 收集 CPU 型号/核数/睿频、磁盘型号/厂家/总大小、RAID 配置信息、网卡详细信息
@@ -68,7 +68,6 @@ dbcheckperf -d <临时目录>
 | `--duration <时间>` | 网络测试持续时间 | 15s |
 | `--netperf` | 使用 netperf 进行网络测试 | false |
 | `--buffer-size <KB>` | 网络测试缓冲区大小 | 8KB |
-| `--random` | 测试随机读写性能 | false |
 | `--random-bs <KB>` | 随机读写块大小 (KB) | 4KB |
 | `--version` | 显示版本号 | - |
 | `-?` | 显示帮助信息 | - |
@@ -110,28 +109,28 @@ dbcheckperf -f hosts.txt -r N -d /tmp
 dbcheckperf -h localhost -d /tmp -B 16k -S 5GB -r ds
 ```
 
-### 示例 5: 测试随机读写性能
-
-```bash
-dbcheckperf -h localhost -d /tmp -r d --random -v
-```
-
-### 示例 6: 运行全矩阵网络测试
+### 示例 5: 运行全矩阵网络测试
 
 ```bash
 dbcheckperf -f hosts.txt -r M -d /tmp --duration 30s
 ```
 
-### 示例 7: 显示详细硬件信息
+### 示例 6: 显示详细硬件信息
 
 ```bash
 dbcheckperf -d /tmp -r ds -v
 ```
 
-### 示例 8: 收集硬件信息
+### 示例 7: 收集硬件信息
 
 ```bash
 dbcheckperf -r H -v
+```
+
+### 示例 8: 自定义随机块大小
+
+```bash
+dbcheckperf -h localhost -d /tmp -r d --random-bs 8 -v
 ```
 
 这将显示：
@@ -366,11 +365,12 @@ dbcheckperf/
 - **快速测试**: 单次测试快速完成
 - **文件清理**: 测试完成后自动删除测试文件
 
-### 随机读写测试（新增）
+### 随机读写测试
 - **4K 随机**: 默认使用 4KB 块大小进行随机读写测试
 - **随机位置**: 使用 `seek/skip` 参数随机定位读写位置
-- **多次操作**: 执行 1000 次随机读写操作
+- **100 次操作**: 执行 100 次随机读写操作，快速完成测试
 - **直接 I/O**: 使用 `oflag=direct` 和 `iflag=direct` 绕过缓存
+- **默认启用**: 随机读写测试默认包含在 `-r d` 磁盘测试中
 
 ### 内存带宽测试
 - **实际测试**: 使用 Go 实现 STREAM 基准测试，实际执行内存操作

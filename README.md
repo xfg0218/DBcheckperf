@@ -6,8 +6,8 @@ dbcheckperf is a database performance check tool written in Go, based on the Gre
 
 ## Features
 
-- **Disk I/O Testing**: Uses `dd` command to test sequential read/write performance, single iteration for fast completion, uses `oflag=direct` and `conv=fsync` for accurate results
-- **Random I/O Testing**: Supports 4K random read/write performance testing using `dd` with `seek/skip` parameters for random position access
+- **Disk I/O Testing**: Uses `dd` command to test sequential and random read/write performance, single iteration for fast completion, uses `oflag=direct` and `conv=fsync` for accurate results
+- **Random I/O Testing**: Default 4K random read/write testing using `dd` with `seek/skip` parameters for random position access, 100 iterations for quick completion
 - **Memory Bandwidth Testing**: Uses STREAM benchmark method (Go implementation), actually executes Copy/Scale/Add/Triad memory operations
 - **Network Performance Testing**: Supports iperf3/netperf/curl/TCP stream multiple test methods, automatically selects the best tool
 - **Hardware Information Collection**: Collects CPU model/cores/turbo frequency, disk model/vendor/size, RAID configuration, network card details
@@ -68,7 +68,6 @@ dbcheckperf -d <temp_dir>
 | `--duration <time>` | Network test duration | 15s |
 | `--netperf` | Use netperf for network testing | false |
 | `--buffer-size <KB>` | Network test buffer size | 8KB |
-| `--random` | Test random read/write performance | false |
 | `--random-bs <KB>` | Random I/O block size (KB) | 4KB |
 | `--version` | Display version number | - |
 | `-?` | Display help information | - |
@@ -110,28 +109,28 @@ dbcheckperf -f hosts.txt -r N -d /tmp
 dbcheckperf -h localhost -d /tmp -B 16k -S 5GB -r ds
 ```
 
-### Example 5: Test Random I/O Performance
-
-```bash
-dbcheckperf -h localhost -d /tmp -r d --random -v
-```
-
-### Example 6: Run Full Matrix Network Test
+### Example 5: Run Full Matrix Network Test
 
 ```bash
 dbcheckperf -f hosts.txt -r M -d /tmp --duration 30s
 ```
 
-### Example 7: Display Detailed Hardware Information
+### Example 6: Display Detailed Hardware Information
 
 ```bash
 dbcheckperf -d /tmp -r ds -v
 ```
 
-### Example 8: Collect Hardware Information
+### Example 7: Collect Hardware Information
 
 ```bash
 dbcheckperf -r H -v
+```
+
+### Example 8: Custom Random Block Size
+
+```bash
+dbcheckperf -h localhost -d /tmp -r d --random-bs 8 -v
 ```
 
 This will display:
@@ -366,11 +365,12 @@ dbcheckperf/
 - **Quick Test**: Single iteration for fast completion
 - **File Cleanup**: Automatically deletes test files after testing
 
-### Random I/O Testing (New)
+### Random I/O Testing
 - **4K Random**: Uses 4KB block size for random read/write testing by default
 - **Random Position**: Uses `seek/skip` parameters for random read/write positioning
-- **Multiple Operations**: Executes 1000 random read/write operations
+- **100 Iterations**: Executes 100 random read/write operations for quick completion
 - **Direct I/O**: Uses `oflag=direct` and `iflag=direct` to bypass cache
+- **Default Enabled**: Random I/O testing is automatically included with `-r d` disk tests
 
 ### Memory Bandwidth Testing
 - **Actual Testing**: Uses Go implementation of STREAM benchmark, actually executes memory operations
