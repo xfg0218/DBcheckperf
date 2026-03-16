@@ -148,10 +148,10 @@ This will display:
 ==  System Information
 ====================
 
-Hostname            Virtualization  CPU Model                    CPU Cores   Memory Size    OS                Kernel Version        Network Speed
+IP Address          Virtualization  CPU Model                    CPU Cores   Memory Size    OS                Kernel Version        Network Speed
 ----------------------------------------------------------------------------------------------------------------------------------
-server1             Physical        Intel Xeon E5-2680           16          64.00 GB       CentOS 7.9        3.10.0-1160           10000 Mbps
-server2             KVM             AMD EPYC 7K62                32          128.00 GB      Ubuntu 20.04      5.4.0-42              25000 Mbps
+192.168.1.100       Physical        Intel Xeon E5-2680           16          64.00 GB       CentOS 7.9        3.10.0-1160           10000 Mbps
+192.168.1.101       KVM             AMD EPYC 7K62                32          128.00 GB      Ubuntu 20.04      5.4.0-42              25000 Mbps
 ```
 
 ### Hardware Information Table
@@ -163,9 +163,9 @@ server2             KVM             AMD EPYC 7K62                32          128
 
 --- CPU Information ---
 
-Hostname            CPU Model                            Cores      Sockets    Base Freq    Turbo Freq   NUMA Nodes
+IP Address            CPU Model                            Cores      Sockets    Base Freq    Turbo Freq   NUMA Nodes
 --------------------------------------------------------------------------------------------------------------
-server1             Intel Xeon E5-2680 v3 @ 2.50GHz      12         1          2500 MHz     3300 MHz     1
+192.168.1.100         Intel Xeon E5-2680 v3 @ 2.50GHz      12         1          2500 MHz     3300 MHz     1
 
 --- Disk Information ---
 
@@ -199,17 +199,17 @@ bond0        20000 Mbps       1500       1024       Yes        802.3ad         b
 
 --- RAID Information ---
 
-Hostname            Status          RAID Model                            Cache Size        Stripe Size    RAID Level
+IP Address            Status          RAID Model                            Cache Size        Stripe Size    RAID Level
 -------------------------------------------------------------------------------------------------------------------
-server1             Detected        LSI MegaRAID SAS 3508                 2.00 GB           256 KB         RAID10
-server2             Detected        Broadcom MegaRAID SAS 9460-16i        4.00 GB           512 KB         RAID5
+192.168.1.100         Detected        LSI MegaRAID SAS 3508                 2.00 GB           256 KB         RAID10
+192.168.1.101         Detected        Broadcom MegaRAID SAS 9460-16i        4.00 GB           512 KB         RAID5
 
 --- Network Bonding Information ---
 
-Hostname            Bond Status     Bond Mode                             Slave Count      Queue Size
+IP Address            Bond Status     Bond Mode                             Slave Count      Queue Size
 -----------------------------------------------------------------------------------------------
-server1             Bonded          802.3ad Dynamic link aggregation      2                1024
-server2             Unbonded        -                                     -                1000
+192.168.1.100         Bonded          802.3ad Dynamic link aggregation      2                1024
+192.168.1.101         Unbonded        -                                     -                1000
 ```
 
 ### Disk Test Results Table
@@ -220,28 +220,28 @@ server2             Unbonded        -                                     -     
 ====================
 
 --- Sequential Write Performance ---
-Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
 -----------------------------------------------------------------
-server1             2.68s           7.7 GB         2872.06
-server2             2.52s           7.7 GB         3065.45
+192.168.1.100         2.68s           7.7 GB         2872.06
+192.168.1.101         2.52s           7.7 GB         3065.45
 
 --- Sequential Read Performance ---
-Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
 -----------------------------------------------------------------
-server1             2.26s           7.7 GB         3408.01
-server2             2.15s           7.7 GB         3586.12
+192.168.1.100         2.26s           7.7 GB         3408.01
+192.168.1.101         2.15s           7.7 GB         3586.12
 
 --- Random Write Performance ---
-Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
 -----------------------------------------------------------------
-server1             120.50s         4.00 GB        35.64
-server2             125.20s         4.00 GB        34.30
+192.168.1.100         120.50s         4.00 GB        35.64
+192.168.1.101         125.20s         4.00 GB        34.30
 
 --- Random Read Performance ---
-Hostname            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
 -----------------------------------------------------------------
-server1             85.30s          4.00 GB        50.35
-server2             88.70s          4.00 GB        48.42
+192.168.1.100         85.30s          4.00 GB        50.35
+192.168.1.101         88.70s          4.00 GB        48.42
 ```
 
 ### Network Test Results
