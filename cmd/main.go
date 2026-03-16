@@ -438,7 +438,19 @@ func printUsage() {
   dbcheckperf -h localhost -d /tmp -B 32 -S 5GB --random-bs 4 -r d
 
   # 收集硬件信息
-  dbcheckperf -r H -v`)
+  dbcheckperf -r H -v
+
+  # 使用大块大小测试高性能 NVMe SSD
+  dbcheckperf -h localhost -d /data/nvme -B 256k -S 10GB -r d -v
+
+  # 多主机磁盘测试并显示详细输出
+  dbcheckperf -h server1 -h server2 -h server3 -d /data -r d -D -v
+
+  # 延长网络测试时间（60 秒）
+  dbcheckperf -f hosts.txt -r n -d /tmp --duration 60s -v
+
+  # 组合磁盘、内存和网络并行测试
+  dbcheckperf -f hosts.txt -d /data -r dsN -D -v`)
 }
 
 // runHardwareMode 运行硬件信息收集模式
