@@ -53,8 +53,6 @@ type Config struct {
 	UseNetperf bool
 	// BufferSize 网络测试的缓冲区大小（KB）
 	BufferSize int
-	// TestRandom 是否测试随机读写
-	TestRandom bool
 	// RandBlockSize 随机读写块大小（KB）
 	RandBlockSize int
 }
@@ -67,7 +65,6 @@ func DefaultConfig() *Config {
 		Duration:      15 * time.Second,
 		BufferSize:    8, // 默认 8KB 发送缓冲区
 		TestTypes:     []TestType{TestDisk, TestStream, TestNetworkSerial},
-		TestRandom:    false, // 默认不测试随机读写
 		RandBlockSize: 4,     // 随机读写默认 4KB
 	}
 }

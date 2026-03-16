@@ -120,11 +120,11 @@ func main() {
 
 					if isLocal {
 						// 本地主机，直接运行
-						diskChecker := checker.NewDiskCheckerWithRandom(cfg.BlockSize, fileSize, cfg.Verbose, cfg.TestRandom, cfg.RandBlockSize)
+						diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
 						result, err = diskChecker.Run(dir)
 					} else {
 						// 远程主机，通过 SSH 运行
-						diskChecker := checker.NewDiskCheckerWithRandom(cfg.BlockSize, fileSize, cfg.Verbose, cfg.TestRandom, cfg.RandBlockSize)
+						diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
 						result, err = diskChecker.RunRemote(host, dir)
 					}
 
@@ -138,7 +138,7 @@ func main() {
 		} else {
 			// 单机模式：仅在本机执行测试
 			// 创建磁盘检查器
-			diskChecker := checker.NewDiskCheckerWithRandom(cfg.BlockSize, fileSize, cfg.Verbose, cfg.TestRandom, cfg.RandBlockSize)
+			diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
 
 			// 对每个测试目录运行测试
 			for _, dir := range cfg.TestDirs {
@@ -273,7 +273,6 @@ func parseFlags() *config.Config {
 	flag.StringVar(&durationStr, "duration", "15s", "网络测试持续时间")
 	flag.BoolVar(&cfg.UseNetperf, "netperf", false, "使用 netperf 进行网络测试")
 	flag.IntVar(&cfg.BufferSize, "buffer-size", 8, "网络测试缓冲区大小 (KB)")
-	flag.BoolVar(&cfg.TestRandom, "random", false, "测试随机读写性能")
 	flag.IntVar(&cfg.RandBlockSize, "random-bs", 4, "随机读写块大小 (KB)，默认 4KB")
 
 	// 多值参数处理
@@ -413,7 +412,6 @@ func printUsage() {
   --duration <时间>   网络测试持续时间 (如 15s, 1m)，默认 15 秒
   --netperf           使用 netperf 进行网络测试
   --buffer-size <KB>  网络测试缓冲区大小 (KB)，默认 8KB
-  --random            测试随机读写性能（4K 随机读写）
   --random-bs <KB>    随机读写块大小 (KB)，默认 4KB
   --version           显示版本号
   -?                  显示帮助信息
@@ -430,9 +428,6 @@ func printUsage() {
 
   # 使用自定义文件大小和块大小
   dbcheckperf -h localhost -d /tmp -B 16k -S 5GB -r ds
-
-  # 测试随机读写性能
-  dbcheckperf -h localhost -d /tmp -r d --random -v
 
   # 收集硬件信息
   dbcheckperf -r H -v`)

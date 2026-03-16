@@ -58,8 +58,6 @@ type DiskChecker struct {
 	Iterations int
 	// Verbose 是否显示详细输出
 	Verbose bool
-	// TestRandom 是否测试随机读写
-	TestRandom bool
 	// RandBlockSize 随机读写块大小（KB）
 	RandBlockSize int
 	// Host 远程主机名（用于远程测试）
@@ -67,26 +65,13 @@ type DiskChecker struct {
 }
 
 // NewDiskChecker 创建新的磁盘检查器
-func NewDiskChecker(blockSizeKB int, fileSize uint64, verbose bool) *DiskChecker {
+func NewDiskChecker(blockSizeKB int, fileSize uint64, verbose bool, randBlockSizeKB int) *DiskChecker {
 	return &DiskChecker{
 		BlockSize:     blockSizeKB,
 		FileSize:      fileSize,
 		Iterations:    1, // 仅测试一次
 		Verbose:       verbose,
-		TestRandom:    false,
-		RandBlockSize: 4, // 随机读写默认 4KB
-	}
-}
-
-// NewDiskCheckerWithRandom 创建支持随机读写的磁盘检查器
-func NewDiskCheckerWithRandom(blockSizeKB int, fileSize uint64, verbose bool, testRandom bool, randBlockSizeKB int) *DiskChecker {
-	return &DiskChecker{
-		BlockSize:     blockSizeKB,
-		FileSize:      fileSize,
-		Iterations:    1,
-		Verbose:       verbose,
-		TestRandom:    testRandom,
-		RandBlockSize: randBlockSizeKB,
+		RandBlockSize: randBlockSizeKB, // 随机读写默认 4KB
 	}
 }
 
@@ -134,6 +119,9 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 		fmt.Printf("磁盘测试：%s\n", testFile)
 	}
 
+	// 确保测试完成后清理文件
+	defer os.Remove(testFile)
+
 	// 执行写入测试
 	writeBytes, writeTime, err = dc.runWriteTest(testFile, blockSize, count)
 	if err == nil {
@@ -157,24 +145,19 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 		result.ReadBandwidth = float64(readBytes) / readTime / (1024 * 1024)
 	}
 
-	// 执行随机读写测试（如果启用）
-	if dc.TestRandom {
-		result.RandWriteBytes, result.RandWriteTime, result.RandReadBytes, result.RandReadTime, err = dc.runRandomTest(testFile)
-		if err == nil && dc.Verbose {
-			fmt.Printf("随机读写测试完成\n")
-		}
-
-		// 计算随机读写带宽
-		if result.RandWriteTime > 0 {
-			result.RandWriteBandwidth = float64(result.RandWriteBytes) / result.RandWriteTime / (1024 * 1024)
-		}
-		if result.RandReadTime > 0 {
-			result.RandReadBandwidth = float64(result.RandReadBytes) / result.RandReadTime / (1024 * 1024)
-		}
+	// 执行随机读写测试
+	result.RandWriteBytes, result.RandWriteTime, result.RandReadBytes, result.RandReadTime, err = dc.runRandomTest(testFile)
+	if err == nil && dc.Verbose {
+		fmt.Printf("随机读写测试完成\n")
 	}
 
-	// 清理测试文件
-	os.Remove(testFile)
+	// 计算随机读写带宽
+	if result.RandWriteTime > 0 {
+		result.RandWriteBandwidth = float64(result.RandWriteBytes) / result.RandWriteTime / (1024 * 1024)
+	}
+	if result.RandReadTime > 0 {
+		result.RandReadBandwidth = float64(result.RandReadBytes) / result.RandReadTime / (1024 * 1024)
+	}
 
 	return result, nil
 }
@@ -218,6 +201,11 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 		fmt.Printf("远程磁盘测试：%s@%s\n", testFile, host)
 	}
 
+	// 确保测试完成后清理文件
+	defer func() {
+		dc.runSSHCommand(host, fmt.Sprintf("rm -f %s", testFile))
+	}()
+
 	// 执行写入测试
 	writeCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=%d oflag=direct conv=fsync 2>&1",
 		testFile, blockSize, count)
@@ -257,28 +245,23 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 		result.ReadBandwidth = float64(readBytes) / readTime / (1024 * 1024)
 	}
 
-	// 执行随机读写测试（如果启用）
-	if dc.TestRandom {
-		randWriteBytes, randWriteTime, randReadBytes, randReadTime, err := dc.runRemoteRandomTest(host, testFile)
-		if err == nil && dc.Verbose {
-			fmt.Printf("远程随机读写测试完成\n")
-		}
-
-		// 计算随机读写带宽
-		if randWriteTime > 0 {
-			result.RandWriteTime = randWriteTime
-			result.RandWriteBytes = randWriteBytes
-			result.RandWriteBandwidth = float64(randWriteBytes) / randWriteTime / (1024 * 1024)
-		}
-		if randReadTime > 0 {
-			result.RandReadTime = randReadTime
-			result.RandReadBytes = randReadBytes
-			result.RandReadBandwidth = float64(randReadBytes) / randReadTime / (1024 * 1024)
-		}
+	// 执行随机读写测试
+	randWriteBytes, randWriteTime, randReadBytes, randReadTime, err := dc.runRemoteRandomTest(host, testFile)
+	if err == nil && dc.Verbose {
+		fmt.Printf("远程随机读写测试完成\n")
 	}
 
-	// 清理远程测试文件
-	dc.runSSHCommand(host, fmt.Sprintf("rm -f %s", testFile))
+	// 计算随机读写带宽
+	if randWriteTime > 0 {
+		result.RandWriteTime = randWriteTime
+		result.RandWriteBytes = randWriteBytes
+		result.RandWriteBandwidth = float64(randWriteBytes) / randWriteTime / (1024 * 1024)
+	}
+	if randReadTime > 0 {
+		result.RandReadTime = randReadTime
+		result.RandReadBytes = randReadBytes
+		result.RandReadBandwidth = float64(randReadBytes) / randReadTime / (1024 * 1024)
+	}
 
 	return result, nil
 }
@@ -326,7 +309,7 @@ func (dc *DiskChecker) runRemoteRandomTest(host string, testFile string) (uint64
 
 	// 随机读写块大小
 	randBlockSize := dc.RandBlockSize * 1024 // 转换为字节
-	randCount := 1000                        // 随机操作次数
+	randCount := 100                         // 随机操作次数（优化为 100 次，快速完成）
 
 	// 随机写入测试
 	randWriteStart := time.Now()
@@ -533,7 +516,7 @@ func (dc *DiskChecker) runRandomTest(testFile string) (uint64, float64, uint64, 
 
 	// 随机读写块大小
 	randBlockSize := dc.RandBlockSize * 1024 // 转换为字节
-	randCount := 1000                        // 随机操作次数
+	randCount := 100                         // 随机操作次数（优化为 100 次，快速完成）
 
 	// 随机写入测试
 	randWriteStart := time.Now()
