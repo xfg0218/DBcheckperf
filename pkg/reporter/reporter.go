@@ -327,7 +327,7 @@ func (r *Reporter) PrintStreamResults(results []*checker.StreamResult, agg *chec
 	if r.DisplayPerHost {
 		// 打印表头
 		header := fmt.Sprintf("%-20s %-15s %-15s %-15s %-15s %-15s",
-			"主机名", "复制 (MB/s)", "缩放 (MB/s)", "加法 (MB/s)", "三合一 (MB/s)", "总计 (MB/s)")
+			"IP 地址", "复制 (MB/s)", "缩放 (MB/s)", "加法 (MB/s)", "三合一 (MB/s)", "总计 (MB/s)")
 		fmt.Println(header)
 		fmt.Println(strings.Repeat("-", 95))
 

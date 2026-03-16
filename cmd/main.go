@@ -174,6 +174,8 @@ func main() {
 		if err != nil {
 			rep.PrintError(fmt.Errorf("内存带宽测试失败：%v", err))
 		} else {
+			// 将主机名解析为 IP 地址
+			result.Host = checker.ResolveToIP(result.Host)
 			streamResults = append(streamResults, result)
 
 			// 聚合结果
