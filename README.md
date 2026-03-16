@@ -265,7 +265,7 @@ Maximum Bandwidth: 120.45 MB/s
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║                    T E S T   S U M M A R Y                    ║
+║                      T E S T   S U M M A R Y                 ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Sequential Write Bandwidth: 2872.06 MB/s [server1]          ║
 ║  Sequential Read Bandwidth: 3408.01 MB/s [server1]           ║
@@ -283,14 +283,14 @@ Maximum Bandwidth: 120.45 MB/s
 ==  Comprehensive Test Results
 ====================
 
-Test Item              Result               Notes
---------------------------------------------------------------
-Sequential Write       2872.06 MB/s        Single iteration
-Sequential Read        3408.01 MB/s        Single iteration
-Random Write (4K)      35.64 MB/s          Single iteration
-Random Read (4K)       50.35 MB/s          Single iteration
-Memory Bandwidth       181397.02 MB/s      Single iteration
-Network Bandwidth      110.56 MB/s         Single iteration
+Test Item              Average              Min                  Max                  Notes               
+---------------------------------------------------------------------------------------------------
+Sequential Write       2872.06 MB/s        2872.06 MB/s        2872.06 MB/s        1 test              
+Sequential Read        3408.01 MB/s        3408.01 MB/s        3408.01 MB/s        1 test              
+Random Write (4K)      35.64 MB/s          35.64 MB/s          35.64 MB/s          1 test              
+Random Read (4K)       50.35 MB/s          50.35 MB/s          50.35 MB/s          1 test              
+Memory Bandwidth       181397.02 MB/s      181397.02 MB/s      181397.02 MB/s      1 test              
+Network Bandwidth      110.56 MB/s         110.56 MB/s         110.56 MB/s         1 test              
 ```
 
 ## Host File Format
