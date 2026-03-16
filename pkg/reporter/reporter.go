@@ -393,14 +393,24 @@ func (r *Reporter) PrintSummary(diskResults []*checker.DiskResult, streamResults
 	if len(diskResults) > 0 {
 		writeAgg := checker.AggregateDiskResults(diskResults, true)
 		readAgg := checker.AggregateDiskResults(diskResults, false)
-		fmt.Printf("║  磁盘写入带宽：%-45s ║\n", fmt.Sprintf("平均 %s, 最小 %s [%s]",
+		randWriteAgg := checker.AggregateDiskRandResults(diskResults, true)
+		randReadAgg := checker.AggregateDiskRandResults(diskResults, false)
+		fmt.Printf("║  顺序写入带宽：%-42s ║\n", fmt.Sprintf("平均 %s, 最小 %s [%s]",
 			utils.FormatBandwidth(writeAgg.AvgValue),
 			utils.FormatBandwidth(writeAgg.MinValue),
 			writeAgg.MinHost))
-		fmt.Printf("║  磁盘读取带宽：%-45s ║\n", fmt.Sprintf("平均 %s, 最小 %s [%s]",
+		fmt.Printf("║  顺序读取带宽：%-42s ║\n", fmt.Sprintf("平均 %s, 最小 %s [%s]",
 			utils.FormatBandwidth(readAgg.AvgValue),
 			utils.FormatBandwidth(readAgg.MinValue),
 			readAgg.MinHost))
+		fmt.Printf("║  随机写入带宽：%-42s ║\n", fmt.Sprintf("平均 %s, 最小 %s [%s]",
+			utils.FormatBandwidth(randWriteAgg.AvgValue),
+			utils.FormatBandwidth(randWriteAgg.MinValue),
+			randWriteAgg.MinHost))
+		fmt.Printf("║  随机读取带宽：%-42s ║\n", fmt.Sprintf("平均 %s, 最小 %s [%s]",
+			utils.FormatBandwidth(randReadAgg.AvgValue),
+			utils.FormatBandwidth(randReadAgg.MinValue),
+			randReadAgg.MinHost))
 	}
 
 	// 内存汇总
@@ -463,7 +473,7 @@ func (r *Reporter) printTestSummaryTable(diskResults []*checker.DiskResult, stre
 		writeAgg := checker.AggregateDiskResults(diskResults, true)
 		remark := fmt.Sprintf("%d 次测试", writeAgg.Count)
 		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
-			"磁盘写入",
+			"顺序写入",
 			utils.FormatBandwidth(writeAgg.AvgValue),
 			utils.FormatBandwidth(writeAgg.MinValue),
 			utils.FormatBandwidth(writeAgg.MaxValue),
@@ -475,11 +485,35 @@ func (r *Reporter) printTestSummaryTable(diskResults []*checker.DiskResult, stre
 	if len(diskResults) > 0 {
 		readAgg := checker.AggregateDiskResults(diskResults, false)
 		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
-			"磁盘读取",
+			"顺序读取",
 			utils.FormatBandwidth(readAgg.AvgValue),
 			utils.FormatBandwidth(readAgg.MinValue),
 			utils.FormatBandwidth(readAgg.MaxValue),
 			fmt.Sprintf("%d 次测试", readAgg.Count))
+		fmt.Println(row)
+	}
+
+	// 随机写入
+	if len(diskResults) > 0 {
+		randWriteAgg := checker.AggregateDiskRandResults(diskResults, true)
+		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
+			"随机写入 (4K)",
+			utils.FormatBandwidth(randWriteAgg.AvgValue),
+			utils.FormatBandwidth(randWriteAgg.MinValue),
+			utils.FormatBandwidth(randWriteAgg.MaxValue),
+			fmt.Sprintf("%d 次测试", randWriteAgg.Count))
+		fmt.Println(row)
+	}
+
+	// 随机读取
+	if len(diskResults) > 0 {
+		randReadAgg := checker.AggregateDiskRandResults(diskResults, false)
+		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
+			"随机读取 (4K)",
+			utils.FormatBandwidth(randReadAgg.AvgValue),
+			utils.FormatBandwidth(randReadAgg.MinValue),
+			utils.FormatBandwidth(randReadAgg.MaxValue),
+			fmt.Sprintf("%d 次测试", randReadAgg.Count))
 		fmt.Println(row)
 	}
 
