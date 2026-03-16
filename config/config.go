@@ -63,9 +63,9 @@ func DefaultConfig() *Config {
 		BlockSize:     32,      // 默认 32KB，与 Greenplum 页面大小一致
 		FileSize:      "2xRAM", // 默认使用 2 倍 RAM 大小
 		Duration:      15 * time.Second,
-		BufferSize:    8, // 默认 8KB 发送缓冲区
+		BufferSize:    8,       // 默认 8KB 发送缓冲区
 		TestTypes:     []TestType{TestDisk, TestStream, TestNetworkSerial},
-		RandBlockSize: 4,     // 随机读写默认 4KB
+		RandBlockSize: 0,       // 随机读写使用 -B 参数指定的块大小
 	}
 }
 

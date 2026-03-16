@@ -17,6 +17,10 @@ type Reporter struct {
 	DisplayPerHost bool
 	// Verbose 是否显示详细输出
 	Verbose bool
+	// BlockSize 顺序读写块大小（KB）
+	BlockSize int
+	// RandBlockSize 随机读写块大小（KB），0 表示使用 BlockSize
+	RandBlockSize int
 }
 
 // NewReporter 创建新的报告生成器
@@ -24,7 +28,27 @@ func NewReporter(displayPerHost, verbose bool) *Reporter {
 	return &Reporter{
 		DisplayPerHost: displayPerHost,
 		Verbose:        verbose,
+		BlockSize:      32, // 默认 32KB
+		RandBlockSize:  0,  // 默认 0，表示使用 BlockSize
 	}
+}
+
+// SetBlockSize 设置块大小
+func (r *Reporter) SetBlockSize(sizeKB int) {
+	r.BlockSize = sizeKB
+}
+
+// SetRandBlockSize 设置随机读写块大小
+func (r *Reporter) SetRandBlockSize(sizeKB int) {
+	r.RandBlockSize = sizeKB
+}
+
+// getRandBlockSize 获取实际使用的随机块大小
+func (r *Reporter) getRandBlockSize() int {
+	if r.RandBlockSize > 0 {
+		return r.RandBlockSize
+	}
+	return r.BlockSize
 }
 
 // PrintSystemInfo 打印系统信息表格
@@ -496,8 +520,9 @@ func (r *Reporter) printTestSummaryTable(diskResults []*checker.DiskResult, stre
 	// 随机写入
 	if len(diskResults) > 0 {
 		randWriteAgg := checker.AggregateDiskRandResults(diskResults, true)
+		randLabel := fmt.Sprintf("随机写入 (%dK)", r.getRandBlockSize())
 		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
-			"随机写入 (4K)",
+			randLabel,
 			utils.FormatBandwidth(randWriteAgg.AvgValue),
 			utils.FormatBandwidth(randWriteAgg.MinValue),
 			utils.FormatBandwidth(randWriteAgg.MaxValue),
@@ -508,8 +533,9 @@ func (r *Reporter) printTestSummaryTable(diskResults []*checker.DiskResult, stre
 	// 随机读取
 	if len(diskResults) > 0 {
 		randReadAgg := checker.AggregateDiskRandResults(diskResults, false)
+		randLabel := fmt.Sprintf("随机读取 (%dK)", r.getRandBlockSize())
 		row := fmt.Sprintf("%-20s %-18s %-18s %-18s %-18s",
-			"随机读取 (4K)",
+			randLabel,
 			utils.FormatBandwidth(randReadAgg.AvgValue),
 			utils.FormatBandwidth(randReadAgg.MinValue),
 			utils.FormatBandwidth(randReadAgg.MaxValue),

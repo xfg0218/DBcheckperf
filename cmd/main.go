@@ -32,6 +32,9 @@ func main() {
 
 	// 创建报告生成器
 	rep := reporter.NewReporter(cfg.DisplayPerHost, cfg.Verbose)
+	// 设置块大小和随机读写块大小
+	rep.SetBlockSize(cfg.BlockSize)
+	rep.SetRandBlockSize(cfg.RandBlockSize)
 
 	// 从文件读取主机列表（如果指定了文件）
 	if cfg.HostFile != "" {
@@ -275,7 +278,7 @@ func parseFlags() *config.Config {
 	flag.StringVar(&durationStr, "duration", "15s", "网络测试持续时间")
 	flag.BoolVar(&cfg.UseNetperf, "netperf", false, "使用 netperf 进行网络测试")
 	flag.IntVar(&cfg.BufferSize, "buffer-size", 8, "网络测试缓冲区大小 (KB)")
-	flag.IntVar(&cfg.RandBlockSize, "random-bs", 4, "随机读写块大小 (KB)，默认 4KB")
+	flag.IntVar(&cfg.RandBlockSize, "random-bs", 0, "随机读写块大小 (KB)，默认使用 -B 参数的值")
 
 	// 多值参数处理
 	var hosts multiStringFlag
@@ -414,7 +417,7 @@ func printUsage() {
   --duration <时间>   网络测试持续时间 (如 15s, 1m)，默认 15 秒
   --netperf           使用 netperf 进行网络测试
   --buffer-size <KB>  网络测试缓冲区大小 (KB)，默认 8KB
-  --random-bs <KB>    随机读写块大小 (KB)，默认 4KB
+  --random-bs <KB>    随机读写块大小 (KB)，默认使用 -B 参数的值
   --version           显示版本号
   -?                  显示帮助信息
 
@@ -430,6 +433,9 @@ func printUsage() {
 
   # 使用自定义文件大小和块大小
   dbcheckperf -h localhost -d /tmp -B 16k -S 5GB -r ds
+
+  # 自定义随机读写块大小（使用 4KB 进行随机测试）
+  dbcheckperf -h localhost -d /tmp -B 32 -S 5GB --random-bs 4 -r d
 
   # 收集硬件信息
   dbcheckperf -r H -v`)

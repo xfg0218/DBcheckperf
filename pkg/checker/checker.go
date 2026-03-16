@@ -66,12 +66,16 @@ type DiskChecker struct {
 
 // NewDiskChecker 创建新的磁盘检查器
 func NewDiskChecker(blockSizeKB int, fileSize uint64, verbose bool, randBlockSizeKB int) *DiskChecker {
+	// 如果未指定随机块大小，使用顺序读写的块大小
+	if randBlockSizeKB <= 0 {
+		randBlockSizeKB = blockSizeKB
+	}
 	return &DiskChecker{
 		BlockSize:     blockSizeKB,
 		FileSize:      fileSize,
 		Iterations:    1, // 仅测试一次
 		Verbose:       verbose,
-		RandBlockSize: randBlockSizeKB, // 随机读写默认 4KB
+		RandBlockSize: randBlockSizeKB,
 	}
 }
 
