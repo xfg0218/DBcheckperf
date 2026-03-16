@@ -25,7 +25,7 @@ func main() {
 
 	// 验证配置
 	if err := cfg.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "配置错误：%v\n", err)
+		// fmt.Fprintf(os.Stderr, "配置错误：%v\n", err)
 		printUsage()
 		os.Exit(1)
 	}
