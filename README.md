@@ -260,25 +260,25 @@ IP Address            Bond Status     Bond Mode                             Slav
 ====================
 
 --- Sequential Write Performance ---
-IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Speed (MB/s)
 -----------------------------------------------------------------
 192.168.1.100         2.68s           7.7 GB         2872.06
 192.168.1.101         2.52s           7.7 GB         3065.45
 
 --- Sequential Read Performance ---
-IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Speed (MB/s)
 -----------------------------------------------------------------
 192.168.1.100         2.26s           7.7 GB         3408.01
 192.168.1.101         2.15s           7.7 GB         3586.12
 
 --- Random Write Performance ---
-IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Speed (MB/s)
 -----------------------------------------------------------------
 192.168.1.100         120.50s         4.00 GB        35.64
 192.168.1.101         125.20s         4.00 GB        34.30
 
 --- Random Read Performance ---
-IP Address            Time (sec)      Data Size      Bandwidth (MB/s)
+IP Address            Time (sec)      Data Size      Speed (MB/s)
 -----------------------------------------------------------------
 192.168.1.100         85.30s          4.00 GB        50.35
 192.168.1.101         88.70s          4.00 GB        48.42
