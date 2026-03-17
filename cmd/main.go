@@ -307,7 +307,14 @@ func parseFlags() *config.Config {
 
 	// 设置主机和目录
 	cfg.Hosts = hosts
-	cfg.TestDirs = testDirs
+	normalizedTestDirs := make([]string, 0, len(testDirs))
+	for _, dir := range testDirs {
+		normalizedDir := utils.NormalizeDirPath(dir)
+		if normalizedDir != "" {
+			normalizedTestDirs = append(normalizedTestDirs, normalizedDir)
+		}
+	}
+	cfg.TestDirs = normalizedTestDirs
 
 	// 解析测试类型
 	cfg.TestTypes = parseTestTypes(testTypesStr)
