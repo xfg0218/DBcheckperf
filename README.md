@@ -8,8 +8,14 @@ dbcheckperf is a database performance check tool written in Go, based on the Gre
 
 - **Disk I/O Testing**: Uses `dd` command to test sequential and random read/write performance, single iteration for fast completion, uses `oflag=direct` and `conv=fsync` for accurate results
 - **Random I/O Testing**: Default 4K random read/write testing using `dd` with `seek/skip` parameters for random position access, 100 iterations for quick completion
+- **Disk Latency and IOPS Testing**: Uses `dd` or `fio` to test disk read/write latency and IOPS, supports custom block size
+- **Disk Information**: Collects disk type (HDD/SSD/NVMe), model, capacity, filesystem, free space, inode usage
 - **Memory Bandwidth Testing**: Uses STREAM benchmark method (Go implementation), actually executes Copy/Scale/Add/Triad memory operations
 - **Network Performance Testing**: Supports iperf3/netperf/curl/TCP stream multiple test methods, automatically selects the best tool
+- **Network Quality Testing**: Measures network latency, packet loss, error rate, TCP retransmit rate, MTU, etc.
+- **IO Statistics Monitoring**: Gets real-time IO metrics from /proc/diskstats (r/s, w/s, await, %util, etc.)
+- **NUMA Information**: Collects NUMA nodes, memory distribution, CPU affinity, device NUMA nodes
+- **Kernel Parameters**: Collects VM/IO/network related kernel parameters, automatically detects unreasonable configurations with warnings
 - **Hardware Information Collection**: Collects CPU model/cores/turbo frequency, disk model/vendor/size, RAID configuration, network card details
 - **System Information Collection**: Automatically collects CPU cores, memory size, network card speed, etc.
 - **Hardware Detection**: Detects VM/physical machine, RAID card model, stripe size, network bonding, queue size, etc.
@@ -61,7 +67,7 @@ dbcheckperf -d <temp_dir>
 | `-D` | Display detailed results per host | false |
 | `-f <hostfile>` | File containing host list | - |
 | `-h <host>` | Hostname (can be specified multiple times) | - |
-| `-r <test_type>` | Test type: d=disk, s=memory stream, n/N/M=network, H=hardware | dsn |
+| `-r <test_type>` | Test type: d=disk, s=memory, n/N/M=network, H=hardware, l=latency/IOPS, i=IO stats, u=NUMA, k=kernel params, q=network quality, I=disk info | dsn |
 | `-S <file_size>` | Disk I/O test file size | 2xRAM |
 | `-v` | Verbose mode | false |
 | `-V` | Very verbose mode | false |
@@ -69,6 +75,9 @@ dbcheckperf -d <temp_dir>
 | `--netperf` | Use netperf for network testing | false |
 | `--buffer-size <KB>` | Network test buffer size | 8KB |
 | `--random-bs <KB>` | Random I/O block size (KB) | 4KB |
+| `--latency-bs <KB>` | Latency and IOPS test block size (KB) | 4KB |
+| `--iostat-interval` | IO statistics sampling interval | 1s |
+| `--net-quality-target` | Network quality test target host | - |
 | `--version` | Display version number | - |
 | `-?` | Display help information | - |
 
@@ -82,6 +91,12 @@ dbcheckperf -d <temp_dir>
 | `N` | Network Parallel | Test all hosts simultaneously (requires even number of hosts) |
 | `M` | Network Full Matrix | Each host tests with all other hosts |
 | `H` | Hardware Info | Collect and display hardware configuration information |
+| `l` | Latency/IOPS | Test disk read/write latency and IOPS |
+| `i` | IO Statistics | Get real-time IO metrics from /proc/diskstats |
+| `u` | NUMA | Display NUMA topology and memory distribution |
+| `k` | Kernel Parameters | Display VM/IO/network related kernel parameters |
+| `q` | Network Quality | Test network latency, packet loss, retransmit rate, etc. |
+| `I` | Disk Information | Display disk type, model, capacity, filesystem, etc. |
 
 ## Examples
 
@@ -165,7 +180,63 @@ dbcheckperf -f hosts.txt -d /data -r dsN -D -v
 
 This runs disk I/O, memory bandwidth, and parallel network tests on all hosts.
 
-### Example 13: Hardware Inventory for All Hosts
+### Example 13: Test Disk Latency and IOPS
+
+```bash
+dbcheckperf -h localhost -d /data -r l -v
+```
+
+Test disk read/write latency and IOPS performance using default 4KB block size.
+
+### Example 14: View IO Statistics
+
+```bash
+dbcheckperf -r i -v
+```
+
+Get real-time IO statistics from /proc/diskstats, including r/s, w/s, await, %util, etc.
+
+### Example 15: View NUMA Information
+
+```bash
+dbcheckperf -r u -v
+```
+
+Display NUMA nodes, per-node CPU/memory distribution, CPU distance matrix.
+
+### Example 16: View Kernel Parameters
+
+```bash
+dbcheckperf -r k -v
+```
+
+Display VM/IO/network related kernel parameters with automatic detection of unreasonable configurations.
+
+### Example 17: Test Network Quality
+
+```bash
+dbcheckperf -h localhost -r q --net-quality-target 8.8.8.8 -v
+```
+
+Measure network latency, packet loss, TCP retransmit rate and other metrics to target host.
+
+### Example 18: View Disk Information
+
+```bash
+dbcheckperf -h localhost -d /data -r I -v
+```
+
+Display disk type (HDD/SSD/NVMe), model, capacity, filesystem, free space, inode usage.
+
+### Example 19: Comprehensive Test
+
+```bash
+dbcheckperf -h localhost -d /data -r dslIuk -v
+```
+
+Run disk I/O, memory bandwidth, network, latency, disk info, NUMA, and kernel parameter tests in one go.
+
+### Example 20: Hardware Inventory for All Hosts
 
 ```bash
 dbcheckperf -f hosts.txt -r H -v
@@ -374,13 +445,17 @@ dbcheckperf/
 │   └── config.go           # Configuration management
 └── pkg/
     ├── checker/            # Performance checker (modularized)
-    │   ├── checker.go      # Main API + Hardware module
+    │   ├── checker.go      # Main API entry
     │   ├── checker_test.go # Test file
     │   ├── common/         # Common utilities (IP, SSH)
-    │   ├── disk/           # Disk I/O testing
-    │   ├── network/        # Network testing
+    │   ├── disk/           # Disk I/O testing + disk info detection
+    │   ├── network/        # Network testing + network quality testing
     │   ├── memory/         # Memory bandwidth testing
-    │   └── system/         # System information
+    │   ├── system/         # System information collection
+    │   ├── latency/        # Disk latency and IOPS testing
+    │   ├── iostat/         # IO statistics monitoring
+    │   ├── numa/           # NUMA information collection
+    │   └── kernel/         # Kernel parameters collection
     ├── reporter/
     │   └── reporter.go     # Report generator (table output)
     └── utils/
@@ -389,11 +464,15 @@ dbcheckperf/
 
 **Module Description**:
 - **common**: Common utility functions (IP resolution, SSH command execution)
-- **disk**: Disk I/O testing (sequential and random read/write)
-- **network**: Network performance testing (iperf3/netperf/curl/TCP stream)
+- **disk**: Disk I/O testing (sequential/random read/write) + disk type/model/capacity/filesystem detection
+- **network**: Network performance testing (iperf3/netperf/curl/TCP stream) + network quality testing (latency/packet loss/retransmit)
 - **memory**: Memory bandwidth testing (STREAM benchmark)
 - **system**: System information collection (CPU, memory, disk, network, virtualization)
-- **checker.go**: Main API entry + Hardware information collection
+- **latency**: Disk latency and IOPS testing (dd/fio)
+- **iostat**: IO statistics monitoring (/proc/diskstats)
+- **numa**: NUMA information collection (nodes, memory distribution, CPU affinity)
+- **kernel**: Kernel parameters collection (VM/IO/network parameters)
+- **checker.go**: Main API entry, type aliases, backward compatibility
 
 ## Performance Threshold Reference
 
