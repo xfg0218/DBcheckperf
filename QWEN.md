@@ -178,3 +178,14 @@ go build -o dbcheckperf ./cmd/main.go
 ## 相关文件
 
 - `gpcheckperf.md`: Greenplum gpcheckperf 工具参考文档
+
+## 文件更新
+
+- 每次代码修改后把相关功能更新README.md 和 README_CN.md
+
+## 代码修复与提交
+
+- 当发现代码BUG时先进行提issue，然后根据问题进行分析和修复
+- 代码修复后在自动提交到 GitHub 仓库
+- 在提交时自动过滤临时文件，测试文件，PLAN 文件等
+

@@ -368,16 +368,32 @@ dbcheckperf/
 │   └── main.go             # Main entry point
 ├── go.mod                  # Go module definition
 ├── README.md               # This document
+├── README_CN.md            # Chinese README
+├── QWEN.md                 # AI context document
 ├── config/
 │   └── config.go           # Configuration management
 └── pkg/
-    ├── checker/
-    │   └── checker.go      # Performance checker (disk, network, memory, system)
+    ├── checker/            # Performance checker (modularized)
+    │   ├── checker.go      # Main API + Hardware module
+    │   ├── checker_test.go # Test file
+    │   ├── common/         # Common utilities (IP, SSH)
+    │   ├── disk/           # Disk I/O testing
+    │   ├── network/        # Network testing
+    │   ├── memory/         # Memory bandwidth testing
+    │   └── system/         # System information
     ├── reporter/
     │   └── reporter.go     # Report generator (table output)
     └── utils/
         └── utils.go        # Utility functions
 ```
+
+**Module Description**:
+- **common**: Common utility functions (IP resolution, SSH command execution)
+- **disk**: Disk I/O testing (sequential and random read/write)
+- **network**: Network performance testing (iperf3/netperf/curl/TCP stream)
+- **memory**: Memory bandwidth testing (STREAM benchmark)
+- **system**: System information collection (CPU, memory, disk, network, virtualization)
+- **checker.go**: Main API entry + Hardware information collection
 
 ## Performance Threshold Reference
 

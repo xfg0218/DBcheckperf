@@ -367,17 +367,33 @@ dbcheckperf/
 ├── cmd/
 │   └── main.go             # 主程序入口
 ├── go.mod                  # Go 模块定义
-├── README.md               # 本文档
+├── README.md               # 英文文档
+├── README_CN.md            # 中文文档
+├── QWEN.md                 # AI 上下文文档
 ├── config/
 │   └── config.go           # 配置管理
 └── pkg/
-    ├── checker/
-    │   └── checker.go      # 性能检查器（磁盘、网络、内存、系统）
+    ├── checker/            # 性能检查器（模块化）
+    │   ├── checker.go      # 主 API + 硬件模块
+    │   ├── checker_test.go # 测试文件
+    │   ├── common/         # 公共工具（IP 解析、SSH）
+    │   ├── disk/           # 磁盘 I/O 测试
+    │   ├── network/        # 网络测试
+    │   ├── memory/         # 内存带宽测试
+    │   └── system/         # 系统信息收集
     ├── reporter/
     │   └── reporter.go     # 报告生成器（表格输出）
     └── utils/
         └── utils.go        # 工具函数
 ```
+
+**模块说明**:
+- **common**: 公共工具函数（IP 地址解析、SSH 命令执行）
+- **disk**: 磁盘 I/O 测试（顺序读写、随机读写）
+- **network**: 网络性能测试（iperf3/netperf/curl/TCP 流）
+- **memory**: 内存带宽测试（STREAM 基准测试）
+- **system**: 系统信息收集（CPU、内存、磁盘、网络、虚拟化）
+- **checker.go**: 主 API 入口 + 硬件信息收集
 
 ## 性能阈值参考
 
