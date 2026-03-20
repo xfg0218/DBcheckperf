@@ -48,6 +48,10 @@ type DiskResult struct {
 	RandWriteBandwidth float64
 	// RandReadBandwidth 随机读取带宽（MB/s）
 	RandReadBandwidth float64
+	// BlockSize 磁盘块大小（字节）
+	BlockSize int64
+	// Scheduler 磁盘调度算法
+	Scheduler string
 }
 
 // DiskChecker 磁盘性能检查器
@@ -105,9 +109,18 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 		Dir:  dir,
 	}
 
+	// 收集磁盘信息（块大小和调度算法）
+	device, blockSize, scheduler := CollectDiskInfo(dir)
+	result.BlockSize = blockSize
+	result.Scheduler = scheduler
+
+	if dc.Verbose {
+		fmt.Printf("磁盘设备：%s, 块大小：%d 字节，调度算法：%s\n", device, blockSize, scheduler)
+	}
+
 	// 计算块大小和计数
-	blockSize := dc.BlockSize * 1024 // 转换为字节
-	count := int(testSize / uint64(blockSize))
+	ioBlockSize := dc.BlockSize * 1024 // 转换为字节
+	count := int(testSize / uint64(ioBlockSize))
 	if count == 0 {
 		count = 1
 	}
@@ -129,13 +142,13 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 	defer os.Remove(testFile)
 
 	// 执行写入测试
-	writeBytes, writeTime, err = dc.runWriteTest(testFile, blockSize, count)
+	writeBytes, writeTime, err = dc.runWriteTest(testFile, ioBlockSize, count)
 	if err == nil {
 		// 清空缓存，确保读取测试准确
 		dc.dropCaches()
 
 		// 执行读取测试
-		readBytes, readTime, err = dc.runReadTest(testFile, blockSize)
+		readBytes, readTime, err = dc.runReadTest(testFile, ioBlockSize)
 	}
 
 	// 设置顺序读写结果
@@ -178,6 +191,15 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 		Dir:  dir,
 	}
 
+	// 收集远程磁盘信息（块大小和调度算法）
+	device, blockSize, scheduler := CollectRemoteDiskInfo(host, dir)
+	result.BlockSize = blockSize
+	result.Scheduler = scheduler
+
+	if dc.Verbose {
+		fmt.Printf("远程磁盘设备：%s, 块大小：%d 字节，调度算法：%s\n", device, blockSize, scheduler)
+	}
+
 	// 计算测试文件大小
 	testSize := dc.FileSize
 	if testSize == 0 {
@@ -194,8 +216,8 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 	}
 
 	// 计算块大小和计数
-	blockSize := dc.BlockSize * 1024 // 转换为字节
-	count := int(testSize / uint64(blockSize))
+	ioBlockSize := dc.BlockSize * 1024 // 转换为字节
+	count := int(testSize / uint64(ioBlockSize))
 	if count == 0 {
 		count = 1
 	}
@@ -214,13 +236,13 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 
 	// 执行写入测试
 	writeCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=%d oflag=direct conv=fsync 2>&1",
-		testFile, blockSize, count)
+		testFile, ioBlockSize, count)
 	writeOutput, writeTime, err := dc.runSSHCommandWithTime(host, writeCmd)
 	var writeBytes uint64
 	if err == nil {
 		writeBytes = dc.parseDDOutput(writeOutput)
 		if writeBytes == 0 {
-			writeBytes = uint64(blockSize * count)
+			writeBytes = uint64(ioBlockSize * count)
 		}
 	}
 
@@ -228,7 +250,7 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 	dc.dropRemoteCaches(host)
 
 	// 执行读取测试
-	readCmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d iflag=direct 2>&1", testFile, blockSize)
+	readCmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d iflag=direct 2>&1", testFile, ioBlockSize)
 	readOutput, readTime, err := dc.runSSHCommandWithTime(host, readCmd)
 	var readBytes uint64
 	if err == nil {
@@ -615,4 +637,194 @@ func (dc *DiskChecker) runRandomRead(testFile string, blockSize, count int, file
 	}
 
 	return uint64(totalBytes), nil
+}
+
+// GetDiskBlockSize 获取磁盘的物理块大小（以字节为单位）
+// 通过读取 /sys/block/<device>/queue/hw_sector_size 获取
+func GetDiskBlockSize(device string) int64 {
+	// 尝试从 sysfs 获取硬件扇区大小
+	content, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/queue/hw_sector_size", device))
+	if err == nil {
+		size, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64)
+		if err == nil {
+			return size
+		}
+	}
+
+	// 尝试从 logical_block_size 获取
+	content, err = os.ReadFile(fmt.Sprintf("/sys/block/%s/queue/logical_block_size", device))
+	if err == nil {
+		size, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64)
+		if err == nil {
+			return size
+		}
+	}
+
+	// 默认返回 512 字节
+	return 512
+}
+
+// GetDiskScheduler 获取磁盘的 I/O 调度算法
+// 返回当前使用的调度算法，如：none, mq-deadline, kyber, bfq, cfq 等
+func GetDiskScheduler(device string) string {
+	// 从 sysfs 读取调度算法
+	content, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/queue/scheduler", device))
+	if err != nil {
+		return "unknown"
+	}
+
+	scheduler := strings.TrimSpace(string(content))
+
+	// 调度算法格式：[none] mq-deadline kyber bfq
+	// 方括号包围的是当前使用的调度算法
+	re := regexp.MustCompile(`\[([^\]]+)\]`)
+	matches := re.FindStringSubmatch(scheduler)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+
+	// 如果没有方括号，返回第一个调度算法
+	parts := strings.Fields(scheduler)
+	if len(parts) > 0 {
+		return parts[0]
+	}
+
+	return "unknown"
+}
+
+// GetDiskInfo 获取磁盘的详细信息
+// 返回块大小和调度算法
+func GetDiskInfo(device string) (int64, string) {
+	blockSize := GetDiskBlockSize(device)
+	scheduler := GetDiskScheduler(device)
+	return blockSize, scheduler
+}
+
+// GetDiskDevice 根据测试目录获取磁盘设备名称
+// 例如：/dev/sda, /dev/nvme0n1
+func GetDiskDevice(path string) string {
+	// 使用 df 命令获取设备
+	cmd := exec.Command("df", path)
+	output, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+
+	lines := strings.Split(string(output), "\n")
+	if len(lines) < 2 {
+		return "unknown"
+	}
+
+	// 解析 df 输出，获取设备名
+	fields := strings.Fields(lines[1])
+	if len(fields) < 1 {
+		return "unknown"
+	}
+
+	device := fields[0]
+
+	// 处理 /dev/mapper/ 设备
+	if strings.HasPrefix(device, "/dev/mapper/") {
+		// LVM 设备，返回 mapper 名称
+		return device
+	}
+
+	// 处理分区设备，如 /dev/sda1 -> /dev/sda
+	if strings.HasPrefix(device, "/dev/") {
+		// 移除 /dev/ 前缀
+		devName := strings.TrimPrefix(device, "/dev/")
+		// 移除数字后缀（分区号）
+		re := regexp.MustCompile(`^([a-zA-Z]+)\d+$`)
+		matches := re.FindStringSubmatch(devName)
+		if len(matches) >= 2 {
+			return matches[1]
+		}
+		// 对于 nvme 设备，如 nvme0n1p1 -> nvme0n1
+		re = regexp.MustCompile(`^(nvme\d+n\d+)p?\d*$`)
+		matches = re.FindStringSubmatch(devName)
+		if len(matches) >= 2 {
+			return matches[1]
+		}
+		return devName
+	}
+
+	return "unknown"
+}
+
+// CollectDiskInfo 收集磁盘信息
+// 自动检测测试目录所在的磁盘设备，并获取其块大小和调度算法
+func CollectDiskInfo(dir string) (string, int64, string) {
+	device := GetDiskDevice(dir)
+	if device == "unknown" {
+		return "unknown", 0, "unknown"
+	}
+
+	blockSize := GetDiskBlockSize(device)
+	scheduler := GetDiskScheduler(device)
+
+	return device, blockSize, scheduler
+}
+
+// CollectRemoteDiskInfo 收集远程主机的磁盘信息
+func CollectRemoteDiskInfo(host, dir string) (string, int64, string) {
+	// 获取磁盘设备
+	deviceCmd := fmt.Sprintf("df %s | tail -1 | awk '{print $1}'", dir)
+	deviceOutput, err := common.RunSSHCommand(host, deviceCmd)
+	if err != nil {
+		return "unknown", 0, "unknown"
+	}
+
+	device := strings.TrimSpace(deviceOutput)
+	if device == "" || strings.HasPrefix(device, "/dev/mapper/") {
+		// LVM 或其他特殊设备
+		device = strings.TrimSpace(device)
+		if device == "" {
+			device = "unknown"
+		}
+	} else {
+		// 处理分区设备
+		devName := strings.TrimPrefix(device, "/dev/")
+		re := regexp.MustCompile(`^([a-zA-Z]+)\d+$`)
+		matches := re.FindStringSubmatch(devName)
+		if len(matches) >= 2 {
+			device = matches[1]
+		}
+		re = regexp.MustCompile(`^(nvme\d+n\d+)p?\d*$`)
+		matches = re.FindStringSubmatch(devName)
+		if len(matches) >= 2 {
+			device = matches[1]
+		}
+	}
+
+	// 获取块大小
+	blockSizeCmd := fmt.Sprintf("cat /sys/block/%s/queue/hw_sector_size 2>/dev/null || cat /sys/block/%s/queue/logical_block_size 2>/dev/null || echo 512", device, device)
+	blockSizeOutput, err := common.RunSSHCommand(host, blockSizeCmd)
+	if err != nil {
+		blockSizeOutput = "512"
+	}
+	blockSize, _ := strconv.ParseInt(strings.TrimSpace(blockSizeOutput), 10, 64)
+	if blockSize == 0 {
+		blockSize = 512
+	}
+
+	// 获取调度算法
+	schedulerCmd := fmt.Sprintf("cat /sys/block/%s/queue/scheduler 2>/dev/null | tr -d '[]' | awk '{print $1}' || echo unknown", device)
+	schedulerOutput, err := common.RunSSHCommand(host, schedulerCmd)
+	if err != nil {
+		schedulerOutput = "unknown"
+	}
+	scheduler := strings.TrimSpace(schedulerOutput)
+	// 解析当前调度算法（方括号内的值）
+	re := regexp.MustCompile(`\[([^\]]+)\]`)
+	matches := re.FindStringSubmatch(schedulerOutput)
+	if len(matches) >= 2 {
+		scheduler = matches[1]
+	} else {
+		parts := strings.Fields(schedulerOutput)
+		if len(parts) > 0 {
+			scheduler = parts[0]
+		}
+	}
+
+	return device, blockSize, scheduler
 }
