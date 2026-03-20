@@ -924,3 +924,147 @@ func formatBytes(bytes uint64) string {
 		return fmt.Sprintf("%d B", bytes)
 	}
 }
+
+// ==================== 服务器厂商识别测试 ====================
+
+func TestHardwareChecker_identifyServerVendor(t *testing.T) {
+	checker := NewHardwareChecker(false)
+
+	tests := []struct {
+		name         string
+		manufacturer string
+		expected     string
+	}{
+		// 国内服务器厂商
+		{"浪潮", "Inspur", "浪潮 (Inspur)"},
+		{"浪潮大写", "INSPIUR", "浪潮 (Inspur)"},
+		{"华为", "Huawei", "华为 (Huawei)"},
+		{"新华三", "H3C", "新华三 (H3C)"},
+		{"联想", "Lenovo", "联想 (Lenovo)"},
+		{"中科曙光", "Sugon", "中科曙光 (Sugon)"},
+		{"宝德", "PowerLeader", "宝德 (PowerLeader)"},
+		{"同方", "Tongfang", "同方 (Tongfang)"},
+		{"超聚变", "xFusion", "超聚变 (xFusion)"},
+		{"宁畅", "Nettrix", "宁畅 (Nettrix)"},
+		{"黄河", "HuangHe", "黄河 (Huanghe)"},
+		{"百信", "Baixin", "百信 (Baixin)"},
+		{"华鲲振宇", "Hygon", "Hygon"},
+		
+		// 国际厂商
+		{"戴尔", "Dell", "戴尔 (Dell)"},
+		{"惠普", "HPE", "惠普 (HPE)"},
+		{"广达", "Quanta", "广达 (Quanta)"},
+		{"纬颖", "Wiwynn", "纬颖 (Wiwynn)"},
+		
+		// 未知厂商
+		{"未知", "Unknown Vendor", "Unknown Vendor"},
+		{"空", "", "未知厂商"},
+		{"未指定", "NOT SPECIFIED", "未知厂商"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := checker.identifyServerVendor(tt.manufacturer)
+			if result != tt.expected {
+				t.Errorf("identifyServerVendor(%q) = %q; 期望 %q", tt.manufacturer, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHardwareChecker_identifyServerSeries(t *testing.T) {
+	checker := NewHardwareChecker(false)
+
+	tests := []struct {
+		name        string
+		productName string
+		expectSeries string
+		expectModel  string
+	}{
+		// 浪潮服务器
+		{"浪潮 NF5280", "NF5280 M5", "NF5280 系列", "主流机架式 2U"},
+		{"浪潮 NF5466", "NF5466 M6", "NF5466 系列", "存储优化 4U"},
+		{"浪潮 I9000", "I9000", "I9000 系列", "刀片服务器"},
+		{"浪潮 TS860", "TS860 G3", "TS860 系列", "关键应用 8 路"},
+		
+		// 华为服务器
+		{"华为 TaiShan 200", "TaiShan 200 2280", "TaiShan 200 系列", "ARM 架构 鲲鹏 920"},
+		{"华为 2288H", "2288H V5", "2288H 系列", "主流机架式 2U"},
+		{"华为 4888H", "4888H V5", "4888H 系列", "高端机架式 4U"},
+		
+		// 新华三服务器
+		{"新华三 R4900", "R4900 G5", "R4900 系列", "主流机架式 2U"},
+		{"新华三 R6900", "R6900 G5", "R6900 系列", "高端机架式 4U"},
+		{"新华三 R8900", "R8900 G5", "R8900 系列", "关键业务 8 路"},
+		
+		// 联想服务器
+		{"联想 SR650", "ThinkSystem SR650", "ThinkSystem SR650", "主流机架式 2U"},
+		{"联想 SR850", "ThinkSystem SR850", "ThinkSystem SR850", "高端机架式 4U/8 路"},
+		
+		// 中科曙光服务器
+		{"曙光 I420", "I420-C10", "I420 系列", "主流机架式 2U"},
+		{"曙光 I620", "I620-C10", "I620 系列", "高端机架式 2U"},
+		{"曙光 I840", "I840-C10", "I840 系列", "关键业务 4U/8 路"},
+		
+		// 超聚变服务器
+		{"超聚变 2288H", "2288H V5", "2288H 系列", "主流机架式 2U"},
+		{"超聚变 4888H", "4888H V5", "4888H 系列", "高端机架式 4U"},
+		
+		// 宁畅服务器
+		{"宁畅 G30", "G30", "G30 系列", "主流机架式"},
+		{"宁畅 G50", "G50", "G50 系列", "高端机架式"},
+		{"宁畅 G70", "G70", "G70 系列", "AI 服务器"},
+		
+		// 宝德服务器
+		{"宝德 PR2190", "PR2190K", "PR2190K 系列", "主流机架式 2U"},
+		{"宝德 PR4190", "PR4190K", "PR4190K 系列", "高端机架式 4U"},
+		
+		// 同方服务器
+		{"同方 T220", "T220-K30", "T220 系列", "主流机架式 2U"},
+		{"同方 T460", "T460-K30", "T460 系列", "关键业务 4U"},
+		
+		// 黄河服务器
+		{"黄河 K424", "K424", "K424 系列", "主流机架式 2U"},
+		{"黄河 K824", "K824", "K824 系列", "高端机架式 4U"},
+		
+		// 未知系列
+		{"未知", "Unknown Model", "未知系列", "Unknown Model"},
+		{"空", "", "未知系列", "未知型号"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			series, model := checker.identifyServerSeries(tt.productName)
+			if series != tt.expectSeries {
+				t.Errorf("identifyServerSeries(%q) series = %q; 期望 %q", tt.productName, series, tt.expectSeries)
+			}
+			if model != tt.expectModel {
+				t.Errorf("identifyServerSeries(%q) model = %q; 期望 %q", tt.productName, model, tt.expectModel)
+			}
+		})
+	}
+}
+
+func TestRAIDConfigInfo_StructFields(t *testing.T) {
+	info := &RAIDConfigInfo{
+		HasRAID:       true,
+		RAIDModel:     "LSI 3508",
+		CacheSize:     2 * 1024 * 1024 * 1024,
+		StripeSize:    64,
+		RAIDLevel:     "RAID 5",
+		BatteryBackup: true,
+		ServerVendor:  "浪潮 (Inspur)",
+		ServerSeries:  "NF5280 系列",
+		ServerModel:   "主流机架式 2U",
+	}
+
+	if info.ServerVendor != "浪潮 (Inspur)" {
+		t.Errorf("ServerVendor = %q; 期望 浪潮 (Inspur)", info.ServerVendor)
+	}
+	if info.ServerSeries != "NF5280 系列" {
+		t.Errorf("ServerSeries = %q; 期望 NF5280 系列", info.ServerSeries)
+	}
+	if info.ServerModel != "主流机架式 2U" {
+		t.Errorf("ServerModel = %q; 期望 主流机架式 2U", info.ServerModel)
+	}
+}

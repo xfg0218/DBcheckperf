@@ -1295,6 +1295,12 @@ type RAIDConfigInfo struct {
 	RAIDLevel string
 	// BatteryBackup 是否有电池备份
 	BatteryBackup bool
+	// ServerVendor 服务器厂商
+	ServerVendor string
+	// ServerSeries 服务器系列
+	ServerSeries string
+	// ServerModel 服务器型号
+	ServerModel string
 }
 
 // NICInfo 网卡详细信息
@@ -1808,6 +1814,9 @@ func (hc *HardwareChecker) collectRemoteRAIDInfo(host string) *RAIDConfigInfo {
 		info.StripeSize = 512
 	}
 
+	// 方法 7: 识别服务器厂商和型号
+	hc.collectServerVendorInfo(host, info)
+
 	return info
 }
 
@@ -1951,6 +1960,206 @@ func (hc *HardwareChecker) collectRemoteRAIDInfoSsacli(host string, info *RAIDCo
 			info.RAIDModel = "HP SmartArray"
 		}
 	}
+}
+
+// collectServerVendorInfo 通过 SSH 收集服务器厂商和型号信息
+func (hc *HardwareChecker) collectServerVendorInfo(host string, info *RAIDConfigInfo) {
+	// 使用 dmidecode 获取系统信息
+	output, err := runSSHCommand(host, "dmidecode -t system 2>/dev/null")
+	if err != nil {
+		return
+	}
+
+	// 解析制造商
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		
+		// 解析制造商
+		if strings.HasPrefix(line, "Manufacturer:") {
+			manufacturer := strings.TrimSpace(strings.TrimPrefix(line, "Manufacturer:"))
+			info.ServerVendor = hc.identifyServerVendor(manufacturer)
+		}
+		
+		// 解析产品名称
+		if strings.HasPrefix(line, "Product Name:") {
+			productName := strings.TrimSpace(strings.TrimPrefix(line, "Product Name:"))
+			info.ServerSeries, info.ServerModel = hc.identifyServerSeries(productName)
+		}
+	}
+}
+
+// identifyServerVendor 识别服务器厂商
+func (hc *HardwareChecker) identifyServerVendor(manufacturer string) string {
+	manufacturer = strings.ToUpper(manufacturer)
+	
+	// 国内服务器厂商映射
+	vendorMap := map[string]string{
+		"INSPIUR":     "浪潮 (Inspur)",
+		"INSPUR":      "浪潮 (Inspur)",
+		"HUAWEI":      "华为 (Huawei)",
+		"H3C":         "新华三 (H3C)",
+		"LENOVO":      "联想 (Lenovo)",
+		"SUGON":       "中科曙光 (Sugon)",
+		"DACIAN":      "中科曙光 (Sugon)",
+		"POWERLEADER": "宝德 (PowerLeader)",
+		"TONGFANG":    "同方 (Tongfang)",
+		"FOUNDER":     "方正 (Founder)",
+		"BAIXIN":      "百信 (Baixin)",
+		"HUANGHE":     "黄河 (Huanghe)",
+		"XFUSION":     "超聚变 (xFusion)",
+		"NETTRIX":     "宁畅 (Nettrix)",
+		"KUNPENG":     "鲲鹏生态",
+		"PHYTUM":      "飞腾生态",
+		"HYGOON":      "华鲲振宇",
+		"DCOM":        "神州鲲泰",
+		"DELL":        "戴尔 (Dell)",
+		"HPE":         "惠普 (HPE)",
+		"HOWELL":      "惠普 (HPE)",
+		"LEADWIN":     "领维",
+		"QUANTA":      "广达 (Quanta)",
+		"WIWYNN":      "纬颖 (Wiwynn)",
+		"INVENTEC":    "英业达 (Inventec)",
+	}
+	
+	for key, vendor := range vendorMap {
+		if strings.Contains(manufacturer, key) {
+			return vendor
+		}
+	}
+	
+	// 未知厂尚
+	if manufacturer != "" && manufacturer != "NOT SPECIFIED" {
+		return strings.Title(strings.ToLower(manufacturer))
+	}
+	return "未知厂商"
+}
+
+// identifyServerSeries 识别服务器系列和型号
+func (hc *HardwareChecker) identifyServerSeries(productName string) (string, string) {
+	productName = strings.ToUpper(productName)
+	
+	// 浪潮服务器系列
+	if strings.Contains(productName, "NF5280") {
+		return "NF5280 系列", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "NF5466") {
+		return "NF5466 系列", "存储优化 4U"
+	}
+	if strings.Contains(productName, "NF5290") {
+		return "NF5290 系列", "高性能 2U"
+	}
+	if strings.Contains(productName, "I9000") {
+		return "I9000 系列", "刀片服务器"
+	}
+	if strings.Contains(productName, "TS860") {
+		return "TS860 系列", "关键应用 8 路"
+	}
+	
+	// 华为服务器系列
+	if strings.Contains(productName, "TAISHAN 200") {
+		return "TaiShan 200 系列", "ARM 架构 鲲鹏 920"
+	}
+	if strings.Contains(productName, "TAISHAN 100") {
+		return "TaiShan 100 系列", "ARM 架构 鲲鹏 916"
+	}
+	if strings.Contains(productName, "2288H") {
+		return "2288H 系列", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "4888H") {
+		return "4888H 系列", "高端机架式 4U"
+	}
+	if strings.Contains(productName, "FUSIONSERVER") {
+		return "FusionServer 系列", "x86 架构"
+	}
+	if strings.Contains(productName, "E9000") {
+		return "E9000 系列", "刀片服务器"
+	}
+	
+	// 新华三服务器系列
+	if strings.Contains(productName, "R4900") {
+		return "R4900 系列", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "R6900") {
+		return "R6900 系列", "高端机架式 4U"
+	}
+	if strings.Contains(productName, "R8900") {
+		return "R8900 系列", "关键业务 8 路"
+	}
+	if strings.Contains(productName, "X10000") {
+		return "X10000 系列", "高密度多节点"
+	}
+	
+	// 联想服务器系列
+	if strings.Contains(productName, "SR650") {
+		return "ThinkSystem SR650", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "SR850") {
+		return "ThinkSystem SR850", "高端机架式 4U/8 路"
+	}
+	if strings.Contains(productName, "SD530") {
+		return "ThinkSystem SD530", "高密度多节点"
+	}
+	
+	// 中科曙光服务器系列
+	if strings.Contains(productName, "I420") {
+		return "I420 系列", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "I620") {
+		return "I620 系列", "高端机架式 2U"
+	}
+	if strings.Contains(productName, "I840") {
+		return "I840 系列", "关键业务 4U/8 路"
+	}
+	if strings.Contains(productName, "TC4600") {
+		return "TC4600 系列", "刀片服务器"
+	}
+
+	// 宁畅服务器系列
+	if strings.Contains(productName, "G30") {
+		return "G30 系列", "主流机架式"
+	}
+	if strings.Contains(productName, "G50") {
+		return "G50 系列", "高端机架式"
+	}
+	if strings.Contains(productName, "G70") {
+		return "G70 系列", "AI 服务器"
+	}
+	
+	// 宝德服务器系列
+	if strings.Contains(productName, "PR2190") {
+		return "PR2190K 系列", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "PR2780") {
+		return "PR2780K 系列", "存储优化 2U"
+	}
+	if strings.Contains(productName, "PR4190") {
+		return "PR4190K 系列", "高端机架式 4U"
+	}
+	
+	// 同方服务器系列
+	if strings.Contains(productName, "T220") {
+		return "T220 系列", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "T260") {
+		return "T260 系列", "高端机架式 2U"
+	}
+	if strings.Contains(productName, "T460") {
+		return "T460 系列", "关键业务 4U"
+	}
+	
+	// 黄河服务器系列
+	if strings.Contains(productName, "K424") {
+		return "K424 系列", "主流机架式 2U"
+	}
+	if strings.Contains(productName, "K824") {
+		return "K824 系列", "高端机架式 4U"
+	}
+	
+	// 未知系列
+	if productName != "" && productName != "NOT SPECIFIED" {
+		return "未知系列", strings.Title(strings.ToLower(productName))
+	}
+	return "未知系列", "未知型号"
 }
 
 // collectRemoteNICInfo 通过 SSH 收集远程主机网卡信息
