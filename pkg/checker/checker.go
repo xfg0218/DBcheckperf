@@ -1123,22 +1123,34 @@ func (sc *StreamChecker) parseStreamOutput(output string) (*StreamResult, error)
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		fields := strings.Fields(line)
-		if len(fields) >= 4 {
-			switch strings.ToLower(fields[0]) {
+		if len(fields) >= 2 {
+			key := strings.ToLower(strings.TrimSuffix(fields[0], ":"))
+			value, err := strconv.ParseFloat(fields[1], 64)
+			if err != nil {
+				if sc.Verbose {
+					fmt.Printf("警告：解析 STREAM 输出失败：%v\n", err)
+				}
+				continue
+			}
+			switch key {
 			case "copy":
-				result.CopyBandwidth, _ = strconv.ParseFloat(fields[1], 64)
+				result.CopyBandwidth = value
 			case "scale":
-				result.ScaleBandwidth, _ = strconv.ParseFloat(fields[1], 64)
+				result.ScaleBandwidth = value
 			case "add":
-				result.AddBandwidth, _ = strconv.ParseFloat(fields[1], 64)
+				result.AddBandwidth = value
 			case "triad":
-				result.TriadBandwidth, _ = strconv.ParseFloat(fields[1], 64)
+				result.TriadBandwidth = value
 			}
 		}
 	}
 
-	result.TotalBandwidth = result.CopyBandwidth + result.ScaleBandwidth +
-		result.AddBandwidth + result.TriadBandwidth
+	// 计算总带宽（四项平均值）
+	if result.CopyBandwidth > 0 || result.ScaleBandwidth > 0 ||
+		result.AddBandwidth > 0 || result.TriadBandwidth > 0 {
+		result.TotalBandwidth = (result.CopyBandwidth + result.ScaleBandwidth +
+			result.AddBandwidth + result.TriadBandwidth) / 4.0
+	}
 
 	return result, nil
 }
@@ -1843,7 +1855,11 @@ func (hc *HardwareChecker) collectRemoteRAIDInfoStorcli(host string, info *RAIDC
 	if strings.Contains(output, "RAID Level") {
 		info.HasRAID = true
 		if info.RAIDModel == "" {
-			info.RAIDModel = "Broadcom/LSI MegaRAID"
+			if strings.Contains(output, "Inspur") || strings.Contains(output, "INSPUR") {
+				info.RAIDModel = "Inspur MegaRAID"
+			} else {
+				info.RAIDModel = "Broadcom/LSI MegaRAID"
+			}
 		}
 		// 解析 RAID 级别
 		for _, line := range strings.Split(output, "\n") {
@@ -1875,6 +1891,49 @@ func (hc *HardwareChecker) collectRemoteRAIDInfoPerccli(host string, info *RAIDC
 		info.HasRAID = true
 		if info.RAIDModel == "" {
 			info.RAIDModel = "Dell PERC"
+		}
+
+		// 解析 RAID 级别和其他信息
+		for _, line := range strings.Split(output, "\n") {
+			if strings.Contains(line, "RAID Level") {
+				if strings.Contains(line, "RAID0") {
+					info.RAIDLevel = "RAID 0"
+				} else if strings.Contains(line, "RAID1") {
+					info.RAIDLevel = "RAID 1"
+				} else if strings.Contains(line, "RAID5") {
+					info.RAIDLevel = "RAID 5"
+				} else if strings.Contains(line, "RAID6") {
+					info.RAIDLevel = "RAID 6"
+				} else if strings.Contains(line, "RAID10") {
+					info.RAIDLevel = "RAID 10"
+				}
+			}
+
+			// 解析缓存大小
+			if strings.Contains(line, "Memory Size") || strings.Contains(line, "Cache Size") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					sizeStr := strings.TrimSpace(parts[1])
+					if strings.Contains(sizeStr, "MB") {
+						sizeStr = strings.ReplaceAll(sizeStr, "MB", "")
+						if val, err := strconv.Atoi(strings.TrimSpace(sizeStr)); err == nil {
+							info.CacheSize = uint64(val) * 1024 * 1024
+						}
+					} else if strings.Contains(sizeStr, "GB") {
+						sizeStr = strings.ReplaceAll(sizeStr, "GB", "")
+						if val, err := strconv.Atoi(strings.TrimSpace(sizeStr)); err == nil {
+							info.CacheSize = uint64(val) * 1024 * 1024 * 1024
+						}
+					}
+				}
+			}
+
+			// 解析电池备份 (BBU/CV)
+			if strings.Contains(line, "BBU") && strings.Contains(line, "Present") {
+				info.BatteryBackup = true
+			} else if strings.Contains(line, "CV") && strings.Contains(line, "Present") {
+				info.BatteryBackup = true // 某些 PERC 卡使用 CV (CacheVault) 代替 BBU
+			}
 		}
 	}
 }
@@ -2065,27 +2124,42 @@ func (hc *HardwareChecker) collectRemoteMemoryInfoDmidecode(host string, memInfo
 	hc.parseDmidecodeMemoryOutput(output, memInfo)
 }
 
-// parseSizeString 解析带单位的大小字符串（如 500G, 1T, 500M）
+// parseSizeString 解析带单位的大小字符串（如 500G, 1T, 500M, 500GB, 1TB）
 func (hc *HardwareChecker) parseSizeString(sizeStr string) uint64 {
-	sizeStr = strings.ToUpper(sizeStr)
-	var multiplier uint64 = 1
-
-	if strings.HasSuffix(sizeStr, "T") {
-		multiplier = 1024 * 1024 * 1024 * 1024
-		sizeStr = strings.TrimSuffix(sizeStr, "T")
-	} else if strings.HasSuffix(sizeStr, "G") {
-		multiplier = 1024 * 1024 * 1024
-		sizeStr = strings.TrimSuffix(sizeStr, "G")
-	} else if strings.HasSuffix(sizeStr, "M") {
-		multiplier = 1024 * 1024
-		sizeStr = strings.TrimSuffix(sizeStr, "M")
-	} else if strings.HasSuffix(sizeStr, "K") {
-		multiplier = 1024
-		sizeStr = strings.TrimSuffix(sizeStr, "K")
+	sizeStr = strings.ToUpper(strings.TrimSpace(sizeStr))
+	
+	// 定义单位映射表，按长度降序排列，确保先匹配长单位
+	unitMap := []struct {
+		suffix     string
+		multiplier uint64
+	}{
+		{"TB", 1024 * 1024 * 1024 * 1024},
+		{"T", 1024 * 1024 * 1024 * 1024},
+		{"GB", 1024 * 1024 * 1024},
+		{"G", 1024 * 1024 * 1024},
+		{"MB", 1024 * 1024},
+		{"M", 1024 * 1024},
+		{"KB", 1024},
+		{"K", 1024},
 	}
-
-	size, _ := strconv.ParseUint(sizeStr, 10, 64)
-	return size * multiplier
+	
+	// 查找匹配的单位
+	var multiplier uint64 = 1
+	for _, unit := range unitMap {
+		if strings.HasSuffix(sizeStr, unit.suffix) {
+			multiplier = unit.multiplier
+			sizeStr = strings.TrimSuffix(sizeStr, unit.suffix)
+			break
+		}
+	}
+	
+	// 解析数值
+	sizeFloat, err := strconv.ParseFloat(sizeStr, 64)
+	if err != nil {
+		return 0
+	}
+	
+	return uint64(sizeFloat * float64(multiplier))
 }
 
 // Run 收集系统信息
@@ -2230,6 +2304,12 @@ func (sc *SystemChecker) getCPUModel() string {
 
 // parseARMModel 解析 ARM CPU 型号
 func (sc *SystemChecker) parseARMModel(model string) string {
+	// 提取版本号前的名称（例如 "Cortex-A72 r0p3" -> "Cortex-A72"）
+	model = strings.TrimSpace(model)
+	if idx := strings.Index(model, " r"); idx != -1 {
+		model = strings.TrimSpace(model[:idx])
+	}
+
 	// ARM 实现 ID 映射
 	armImplementations := map[string]string{
 		"0xd03": "Cortex-A53",
@@ -3358,10 +3438,10 @@ func (hc *HardwareChecker) extractVendor(model string) string {
 	if strings.Contains(model, "INTEL") {
 		return "Intel"
 	}
-	if strings.Contains(model, "WD ") || strings.Contains(model, "WESTERN DIGITAL") {
+	if strings.Contains(model, "WD ") || strings.Contains(model, "WESTERN DIGITAL") || strings.HasPrefix(model, "WD") {
 		return "Western Digital"
 	}
-	if strings.Contains(model, "SEAGATE") {
+	if strings.Contains(model, "SEAGATE") || strings.HasPrefix(model, "ST") {
 		return "Seagate"
 	}
 	if strings.Contains(model, "TOSHIBA") {
@@ -3379,7 +3459,13 @@ func (hc *HardwareChecker) extractVendor(model string) string {
 	if strings.Contains(model, "KINGSTON") {
 		return "Kingston"
 	}
-	return ""
+	if strings.Contains(model, "INSPUR") {
+		return "Inspur"
+	}
+	if strings.Contains(model, "PERC") || strings.Contains(model, "DELL") {
+		return "Dell"
+	}
+	return "Unknown"
 }
 
 // collectRAIDInfo 收集 RAID 信息
@@ -3431,7 +3517,7 @@ func (hc *HardwareChecker) collectRAIDInfoLinux() *RAIDConfigInfo {
 func (hc *HardwareChecker) parseLspciForRAID(output string, info *RAIDConfigInfo) {
 	raidKeywords := []string{
 		"raid", "sas controller", "storage controller", "perc",
-		"smart array", "mega raid", "poweredge raid",
+		"smart array", "mega raid", "poweredge raid", "inspur", "lsi logic",
 	}
 	for _, line := range strings.Split(output, "\n") {
 		lineLower := strings.ToLower(line)
@@ -3506,7 +3592,11 @@ func (hc *HardwareChecker) collectRAIDInfoStorcli(info *RAIDConfigInfo) {
 	if strings.Contains(content, "RAID Level") {
 		info.HasRAID = true
 		if info.RAIDModel == "" {
-			info.RAIDModel = "Broadcom/LSI MegaRAID"
+			if strings.Contains(content, "Inspur") || strings.Contains(content, "INSPUR") {
+				info.RAIDModel = "Inspur MegaRAID"
+			} else {
+				info.RAIDModel = "Broadcom/LSI MegaRAID"
+			}
 		}
 		// 解析 RAID 级别
 		for _, line := range strings.Split(content, "\n") {
@@ -3544,6 +3634,49 @@ func (hc *HardwareChecker) collectRAIDInfoPerccli(info *RAIDConfigInfo) {
 		info.HasRAID = true
 		if info.RAIDModel == "" {
 			info.RAIDModel = "Dell PERC"
+		}
+
+		// 解析 RAID 级别和其他信息
+		for _, line := range strings.Split(content, "\n") {
+			if strings.Contains(line, "RAID Level") {
+				if strings.Contains(line, "RAID0") {
+					info.RAIDLevel = "RAID 0"
+				} else if strings.Contains(line, "RAID1") {
+					info.RAIDLevel = "RAID 1"
+				} else if strings.Contains(line, "RAID5") {
+					info.RAIDLevel = "RAID 5"
+				} else if strings.Contains(line, "RAID6") {
+					info.RAIDLevel = "RAID 6"
+				} else if strings.Contains(line, "RAID10") {
+					info.RAIDLevel = "RAID 10"
+				}
+			}
+
+			// 解析缓存大小
+			if strings.Contains(line, "Memory Size") || strings.Contains(line, "Cache Size") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					sizeStr := strings.TrimSpace(parts[1])
+					if strings.Contains(sizeStr, "MB") {
+						sizeStr = strings.ReplaceAll(sizeStr, "MB", "")
+						if val, err := strconv.Atoi(strings.TrimSpace(sizeStr)); err == nil {
+							info.CacheSize = uint64(val) * 1024 * 1024
+						}
+					} else if strings.Contains(sizeStr, "GB") {
+						sizeStr = strings.ReplaceAll(sizeStr, "GB", "")
+						if val, err := strconv.Atoi(strings.TrimSpace(sizeStr)); err == nil {
+							info.CacheSize = uint64(val) * 1024 * 1024 * 1024
+						}
+					}
+				}
+			}
+
+			// 解析电池备份 (BBU/CV)
+			if strings.Contains(line, "BBU") && strings.Contains(line, "Present") {
+				info.BatteryBackup = true
+			} else if strings.Contains(line, "CV") && strings.Contains(line, "Present") {
+				info.BatteryBackup = true // 某些 PERC 卡使用 CV (CacheVault) 代替 BBU
+			}
 		}
 	}
 }
