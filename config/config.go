@@ -23,6 +23,18 @@ const (
 	TestNetworkMatrix TestType = "M"
 	// TestHardware 硬件信息收集
 	TestHardware TestType = "H"
+	// TestLatency 延迟和 IOPS 测试
+	TestLatency TestType = "l"
+	// TestIOStat IO 统计
+	TestIOStat TestType = "i"
+	// TestNUMA NUMA 信息
+	TestNUMA TestType = "u"
+	// TestKernel 内核参数
+	TestKernel TestType = "k"
+	// TestNetQuality 网络质量测试
+	TestNetQuality TestType = "q"
+	// TestDiskInfo 磁盘详细信息
+	TestDiskInfo TestType = "I"
 )
 
 // Config 配置结构体，包含所有运行参数
@@ -55,17 +67,27 @@ type Config struct {
 	BufferSize int
 	// RandBlockSize 随机读写块大小（KB）
 	RandBlockSize int
+	// LatencyBlockSize 延迟测试块大小（KB）
+	LatencyBlockSize int
+	// IOStatInterval IO 统计采样间隔（秒），字符串格式如 "1s"
+	IOStatInterval string
+	// IOStatDevices IO 统计设备列表
+	IOStatDevices []string
+	// NetQualityTarget 网络质量测试目标主机
+	NetQualityTarget string
 }
 
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		BlockSize:     32,      // 默认 32KB，与 Greenplum 页面大小一致
-		FileSize:      "2xRAM", // 默认使用 2 倍 RAM 大小
-		Duration:      15 * time.Second,
-		BufferSize:    8,       // 默认 8KB 发送缓冲区
-		TestTypes:     []TestType{TestDisk, TestStream, TestNetworkSerial},
-		RandBlockSize: 0,       // 随机读写使用 -B 参数指定的块大小
+		BlockSize:        32,       // 默认 32KB，与 Greenplum 页面大小一致
+		FileSize:         "2xRAM",  // 默认使用 2 倍 RAM 大小
+		Duration:         15 * time.Second,
+		BufferSize:       8,        // 默认 8KB 发送缓冲区
+		TestTypes:        []TestType{TestDisk, TestStream, TestNetworkSerial},
+		RandBlockSize:    0,        // 随机读写使用 -B 参数指定的块大小
+		LatencyBlockSize: 4,        // 延迟测试默认 4KB
+		IOStatInterval:   "1s",     // IO 统计默认 1 秒间隔
 	}
 }
 

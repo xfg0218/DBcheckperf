@@ -17,14 +17,18 @@ dbcheckperf/
 ├── config/
 │   └── config.go           # 配置管理，定义 Config 结构体和测试类型
 └── pkg/
-    ├── checker/            # 性能检查器（模块化，2026-03-20 重构）
-    │   ├── checker.go      # 主 API + Hardware 模块（380 行）
-    │   ├── checker_test.go # 测试文件（371 行，11 个测试用例）
+    ├── checker/            # 性能检查器（模块化）
+    │   ├── checker.go      # 主 API 入口，类型别名
+    │   ├── checker_test.go # 测试文件
     │   ├── common/         # 公共工具函数（IP 解析、SSH 命令）
-    │   ├── disk/           # 磁盘 I/O 测试（顺序/随机读写）
-    │   ├── network/        # 网络性能测试（iperf3/netperf/curl）
+    │   ├── disk/           # 磁盘 I/O 测试（顺序/随机读写 + 磁盘信息）
+    │   ├── network/        # 网络性能测试 + 网络质量检测
     │   ├── memory/         # 内存带宽测试（STREAM 基准）
-    │   └── system/         # 系统信息收集（CPU/内存/磁盘/网络）
+    │   ├── system/         # 系统信息收集（CPU/内存/磁盘/网络）
+    │   ├── latency/        # 磁盘延迟和 IOPS 测试
+    │   ├── iostat/         # IO 统计监控（/proc/diskstats）
+    │   ├── numa/           # NUMA 信息收集
+    │   └── kernel/         # 内核参数收集（VM/IO/网络）
     ├── reporter/
     │   └── reporter.go     # 报告生成器，表格格式化输出
     └── utils/
@@ -36,19 +40,32 @@ dbcheckperf/
 | 模块 | 文件 | 行数 | 功能描述 |
 |------|------|------|----------|
 | **common** | `common/common.go` | 92 | IP 地址解析、SSH 命令执行、主机名获取 |
-| **disk** | `disk/disk.go` | 618 | 磁盘顺序读写、随机读写测试 |
-| **network** | `network/network.go` | 319 | 网络性能测试（串行/并行/全矩阵模式） |
+| **disk** | `disk/disk.go` | 1160 | 磁盘顺序读写、随机读写、磁盘类型/型号/容量/文件系统检测 |
+| **network** | `network/network.go` | 680 | 网络性能测试（串行/并行/全矩阵模式）+ 网络质量检测（延迟/丢包/重传） |
 | **memory** | `memory/memory.go` | 203 | 内存带宽测试（STREAM 基准） |
-| **system** | `system/system.go` | 555 | 系统信息收集（CPU、内存、磁盘、虚拟化等） |
-| **checker.go** | `checker.go` | 380 | 主 API 入口、类型别名、Hardware 模块 |
+| **system** | `system/system.go` | 555 | 系统信息收集（CPU、内存、磁盘、虚拟化、RAID、网卡绑定等） |
+| **latency** | `latency/latency.go` | 530 | 磁盘读写延迟测试、IOPS 测试（支持 dd/fio） |
+| **iostat** | `iostat/iostat.go` | 455 | IO 统计监控（r/s, w/s, await, %util, avgqu-sz 等） |
+| **numa** | `numa/numa.go` | 480 | NUMA 节点信息、内存分布、CPU 亲和性 |
+| **kernel** | `kernel/kernel.go` | 532 | 内核参数收集（VM/IO/网络参数，支持告警检查） |
+| **checker.go** | `checker.go` | 420 | 主 API 入口、类型别名、向后兼容 |
 
-### 重构历史
+### 重构和增强历史
 
 - **2026-03-20**: 模块化重构 - 将 checker.go (4,433 行) 拆分为 6 个模块
   - 主文件减少到 380 行（减少 91.4%）
   - 总代码从 4,433 行减少到 2,167 行（减少 51.1%）
   - 保持向后兼容的 API
   - 所有测试通过（11 个测试用例 + 5 个基准测试）
+
+- **2026-03-20**: MPP 数据库关键 IO 指标增强
+  - 新增延迟测试模块（latency/）
+  - 新增 IO 统计模块（iostat/）
+  - 新增 NUMA 模块（numa/）
+  - 新增内核参数模块（kernel/）
+  - 扩展磁盘信息（类型/型号/容量/文件系统/可用空间/inode）
+  - 扩展网络质量测试（延迟/丢包率/错包率/TCP 重传率/MTU）
+  - 新增测试类型：l(延迟/IOPS), i(IO 统计), u(NUMA), k(内核参数), q(网络质量), I(磁盘信息)
 
 ## 核心功能
 
@@ -69,6 +86,30 @@ dbcheckperf/
 - 默认 4KB 块大小 (`--random-bs`)
 - 执行 1000 次随机读写操作
 - 报告随机写入/读取带宽 (MB/s)
+
+### 1.2 磁盘延迟和 IOPS 测试 (`-r l`)
+- 使用 `dd` 或 `fio` 命令测试磁盘读写延迟
+- **测试指标**:
+  - 平均读/写延迟 (ms)
+  - 最大/最小读/写延迟 (ms)
+  - 读/写 IOPS (次/秒)
+- **测试机制**:
+  - 支持 dd 和 fio 两种测试方法（fio 优先）
+  - 队列深度为 1，测量单次 IO 延迟
+  - 可自定义块大小（默认 4KB）
+  - 支持本地和远程测试
+
+### 1.3 磁盘详细信息 (`-r I`)
+- **磁盘硬件信息**:
+  - 磁盘类型（HDD/SSD/NVMe）
+  - 磁盘型号和厂家
+  - 磁盘容量
+  - 块大小和调度算法
+- **文件系统信息**:
+  - 文件系统类型（ext4/xfs 等）
+  - 挂载选项（noatime/nodiratime 等）
+  - 可用空间
+  - inode 使用率
 
 ### 2. 内存带宽测试 (`-r s`)
 - 使用 STREAM 基准测试方法（Go 语言实现）
@@ -98,6 +139,20 @@ dbcheckperf/
   - 验证实际传输字节数
 - 支持 netperf (`--netperf`)
 
+### 3.1 网络质量测试 (`-r q`)
+- **测试指标**:
+  - 网络延迟（平均/最大/最小，ms）
+  - 丢包率 (%)
+  - 错包率 (%)
+  - TCP 重传率 (%)
+  - MTU 大小
+  - 网卡队列大小
+- **测试方法**:
+  - ping 命令测量延迟和丢包率
+  - 解析 /proc/net/netstat 获取 TCP 重传率
+  - ip -s link 获取错包率
+  - ip link 获取 MTU
+
 ### 4. 系统信息收集
 - CPU 核心数和型号
 - 内存大小
@@ -110,6 +165,48 @@ dbcheckperf/
 - **多架构支持**:
   - x86/x86_64: Intel/AMD 服务器 CPU
   - ARM/ARM64: Qualcomm/Ampere/Apple Silicon 等
+
+### 4.1 IO 统计信息 (`-r i`)
+- **实时 IO 监控指标** (从 /proc/diskstats):
+  - r/s: 每秒读次数
+  - w/s: 每秒写次数
+  - rkB/s: 每秒读 KB 数
+  - wkB/s: 每秒写 KB 数
+  - await: 平均 IO 等待时间 (ms)
+  - %util: 磁盘利用率
+  - avgqu-sz: 平均队列长度
+  - svctm: 平均服务时间 (ms)
+- **告警提示**: 当 %util > 80% 时显示警告
+
+### 4.2 NUMA 信息 (`-r u`)
+- **NUMA 拓扑信息**:
+  - NUMA 节点数
+  - 每个节点的 CPU 核心数
+  - 每个节点的内存大小和空闲内存
+  - CPU 距离矩阵
+- **NUMA 亲和性**:
+  - 进程 CPU 亲和性
+  - 中断亲和性配置
+  - 设备（网卡/磁盘）NUMA 节点
+
+### 4.3 内核参数 (`-r k`)
+- **VM 参数**:
+  - dirty_ratio / dirty_background_ratio
+  - swappiness
+  - overcommit_memory / overcommit_ratio
+  - min_free_kbytes
+  - transparent_hugepage
+  - numa_balancing
+- **IO 参数**:
+  - read_ahead_kb
+  - max_sectors_kb
+  - nr_requests
+  - scheduler
+- **网络参数**:
+  - somaxconn / netdev_max_backlog
+  - tcp_max_syn_backlog / tcp_max_tw_buckets
+  - tcp_tw_reuse / tcp_keepalive_time
+- **告警检查**: 自动检测不合理的参数配置
 
 ### 5. 硬件信息收集 (`-r H`)
 - **CPU 信息**:
@@ -166,14 +263,17 @@ go build -o dbcheckperf ./cmd/main.go
 | `-d <目录>` | 测试目录（可多次指定） | 必需 |
 | `-f <主机文件>` | 主机列表文件 | - |
 | `-h <主机名>` | 主机名（可多次指定） | - |
-| `-r <类型>` | 测试类型 (d/s/n/N/M/H) | dsn |
+| `-r <类型>` | 测试类型：d=磁盘，s=内存流，n/N/M=网络，H=硬件，l=延迟/IOPS，i=IO 统计，u=NUMA，k=内核参数，q=网络质量，I=磁盘信息 | dsn |
 | `-B <KB>` | 磁盘块大小 | 32 |
 | `-S <大小>` | 磁盘测试文件大小 | 2xRAM |
 | `-D` | 显示每台主机详情 | false |
 | `-v` | 详细模式 | false |
 | `--duration` | 网络测试时长 | 15s |
-| `--random` | 测试随机读写性能 | false |
 | `--random-bs <KB>` | 随机读写块大小 | 4 |
+| `--latency-bs <KB>` | 延迟和 IOPS 测试块大小 | 4 |
+| `--iostat-interval` | IO 统计采样间隔 | 1s |
+| `--net-quality-target` | 网络质量测试目标主机 | - |
+| `--netperf` | 使用 netperf 进行网络测试 | false |
 | `--version` | 显示版本号 | - |
 | `-?` | 显示帮助信息 | - |
 
@@ -183,6 +283,12 @@ go build -o dbcheckperf ./cmd/main.go
 - **磁盘测试结果**: 写入/读取时间、数据量、带宽
 - **内存带宽结果**: 复制、缩放、加法、三合一带宽
 - **网络测试结果**: 源/目标主机、带宽
+- **延迟测试结果**: 读/写延迟 (ms)、IOPS、最大/最小延迟
+- **IO 统计结果**: r/s, w/s, rkB/s, wkB/s, await, %util, avgqu-sz, svctm
+- **NUMA 信息**: 节点数、每节点 CPU/内存、CPU 距离矩阵
+- **内核参数**: VM/IO/网络参数，附带告警提示
+- **网络质量**: 延迟、丢包率、错包率、TCP 重传率、MTU
+- **磁盘详细信息**: 磁盘类型、型号、容量、文件系统、可用空间、inode 使用率
 - **汇总报告**: 各项测试的平均、最小、最大带宽
 
 ## 开发约定
@@ -192,10 +298,14 @@ go build -o dbcheckperf ./cmd/main.go
    - `config`: 配置相关
    - `pkg/checker`: 性能检查逻辑（模块化）
      - `common`: 公共工具函数
-     - `disk`: 磁盘 I/O 测试
-     - `network`: 网络性能测试
+     - `disk`: 磁盘 I/O 测试 + 磁盘信息检测
+     - `network`: 网络性能测试 + 网络质量检测
      - `memory`: 内存带宽测试
      - `system`: 系统信息收集
+     - `latency`: 磁盘延迟和 IOPS 测试
+     - `iostat`: IO 统计监控
+     - `numa`: NUMA 信息收集
+     - `kernel`: 内核参数收集
    - `pkg/reporter`: 报告输出逻辑
    - `pkg/utils`: 通用工具函数
 3. **错误处理**: 使用 error 返回值，重要错误打印到 stderr
@@ -208,12 +318,18 @@ go build -o dbcheckperf ./cmd/main.go
        "dbcheckperf/pkg/checker/network"
        "dbcheckperf/pkg/checker/memory"
        "dbcheckperf/pkg/checker/system"
+       "dbcheckperf/pkg/checker/latency"
+       "dbcheckperf/pkg/checker/iostat"
+       "dbcheckperf/pkg/checker/numa"
+       "dbcheckperf/pkg/checker/kernel"
    )
    ```
 6. **向后兼容**: 使用类型别名和变量重定向保持 API 不变
    ```go
    type DiskResult = disk.DiskResult
    var NewDiskChecker = disk.NewDiskChecker
+   type LatencyResult = latency.LatencyResult
+   var NewLatencyChecker = latency.NewLatencyChecker
    ```
 
 ## 依赖
@@ -249,6 +365,10 @@ import (
     "dbcheckperf/pkg/checker/network"
     "dbcheckperf/pkg/checker/memory"
     "dbcheckperf/pkg/checker/system"
+    "dbcheckperf/pkg/checker/latency"
+    "dbcheckperf/pkg/checker/iostat"
+    "dbcheckperf/pkg/checker/numa"
+    "dbcheckperf/pkg/checker/kernel"
 )
 
 // 使用方式（保持向后兼容）
@@ -257,9 +377,16 @@ networkChecker := checker.NewNetworkChecker(...)
 streamChecker := checker.NewStreamChecker(...)
 systemChecker := checker.NewSystemChecker()
 hardwareChecker := checker.NewHardwareChecker()
+latencyChecker := checker.NewLatencyChecker(...)
+iostatChecker := checker.NewIOStatChecker(...)
+numaChecker := checker.NewNUMAChecker(...)
+kernelChecker := checker.NewKernelChecker(...)
 
 // 直接使用子模块
 common.ResolveToIP("host1")
+latency.GetNetworkOffloadFeatures("eth0")
+numa.GetNUMAInfo()
+kernel.GetKernelParams()
 ```
 
 ### 编译和测试
@@ -277,6 +404,10 @@ go test ./pkg/checker/... -cover
 # 单独测试子模块
 go test ./pkg/checker/disk/...
 go test ./pkg/checker/network/...
+go test ./pkg/checker/latency/...
+go test ./pkg/checker/iostat/...
+go test ./pkg/checker/numa/...
+go test ./pkg/checker/kernel/...
 ```
 
 ### 相关文件

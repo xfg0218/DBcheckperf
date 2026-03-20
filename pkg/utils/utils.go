@@ -246,3 +246,26 @@ func MaxSlice(values []float64) float64 {
 	}
 	return max
 }
+
+// CreateTestFile 创建指定大小的测试文件
+func CreateTestFile(filename string, size uint64) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// 使用 seek 方式快速创建大文件
+	if size > 0 {
+		_, err = file.Seek(int64(size-1), 0)
+		if err != nil {
+			return err
+		}
+		_, err = file.Write([]byte{0})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

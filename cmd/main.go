@@ -270,7 +270,7 @@ func parseFlags() *config.Config {
 	var durationStr string
 
 	flag.StringVar(&cfg.HostFile, "f", "", "包含主机列表的文件路径")
-	flag.StringVar(&testTypesStr, "r", "dsn", "测试类型：d=磁盘，s=内存流，n/N/M=网络 (串行/并行/全矩阵)")
+	flag.StringVar(&testTypesStr, "r", "dsn", "测试类型：d=磁盘，s=内存流，n/N/M=网络 (串行/并行/全矩阵)，l=延迟/IOPS，i=IO 统计，u=NUMA，k=内核参数，q=网络质量，I=磁盘信息，H=硬件信息")
 	flag.IntVar(&cfg.BlockSize, "B", 32, "磁盘 I/O 测试块大小 (KB)")
 	flag.StringVar(&cfg.FileSize, "S", "2xRAM", "磁盘 I/O 测试文件大小 (KB/MB/GB)")
 	flag.BoolVar(&cfg.DisplayPerHost, "D", false, "显示每台主机的详细结果")
@@ -280,6 +280,9 @@ func parseFlags() *config.Config {
 	flag.BoolVar(&cfg.UseNetperf, "netperf", false, "使用 netperf 进行网络测试")
 	flag.IntVar(&cfg.BufferSize, "buffer-size", 8, "网络测试缓冲区大小 (KB)")
 	flag.IntVar(&cfg.RandBlockSize, "random-bs", 0, "随机读写块大小 (KB)，默认使用 -B 参数的值")
+	flag.IntVar(&cfg.LatencyBlockSize, "latency-bs", 4, "延迟和 IOPS 测试块大小 (KB)")
+	flag.StringVar(&cfg.IOStatInterval, "iostat-interval", "1s", "IO 统计采样间隔")
+	flag.StringVar(&cfg.NetQualityTarget, "net-quality-target", "", "网络质量测试目标主机")
 
 	// 多值参数处理
 	var hosts multiStringFlag
@@ -350,6 +353,18 @@ func parseTestTypes(s string) []config.TestType {
 			types = append(types, config.TestNetworkMatrix)
 		case 'H':
 			types = append(types, config.TestHardware)
+		case 'l':
+			types = append(types, config.TestLatency)
+		case 'i':
+			types = append(types, config.TestIOStat)
+		case 'u':
+			types = append(types, config.TestNUMA)
+		case 'k':
+			types = append(types, config.TestKernel)
+		case 'q':
+			types = append(types, config.TestNetQuality)
+		case 'I':
+			types = append(types, config.TestDiskInfo)
 		}
 	}
 
@@ -418,7 +433,11 @@ func printUsage() {
   -D                  显示每台主机的详细结果
   -f <主机文件>       包含主机列表的文件（每行一个主机）
   -h <主机名>         主机名（可多次指定）
-  -r <测试类型>       测试类型：d=磁盘，s=内存流，n/N/M=网络 (串行/并行/全矩阵)，H=硬件信息，默认 dsn
+  -r <测试类型>       测试类型：
+                        d=磁盘 I/O, s=内存流，n/N/M=网络 (串行/并行/全矩阵)
+                        H=硬件信息，l=延迟/IOPS, i=IO 统计，u=NUMA
+                        k=内核参数，q=网络质量，I=磁盘详细信息
+                        默认 dsn
   -S <文件大小>       磁盘 I/O 测试文件大小 (KB/MB/GB)，默认 2 倍 RAM
   -v                  详细模式
   -V                  非常详细模式
@@ -426,6 +445,9 @@ func printUsage() {
   --netperf           使用 netperf 进行网络测试
   --buffer-size <KB>  网络测试缓冲区大小 (KB)，默认 8KB
   --random-bs <KB>    随机读写块大小 (KB)，默认使用 -B 参数的值
+  --latency-bs <KB>   延迟和 IOPS 测试块大小 (KB)，默认 4KB
+  --iostat-interval   IO 统计采样间隔 (如 1s, 5s)，默认 1s
+  --net-quality-target 网络质量测试目标主机
   --version           显示版本号
   -?                  显示帮助信息
 
@@ -458,7 +480,25 @@ func printUsage() {
   dbcheckperf -f hosts.txt -r n -d /tmp --duration 60s -v
 
   # 组合磁盘、内存和网络并行测试
-  dbcheckperf -f hosts.txt -d /data -r dsN -D -v`)
+  dbcheckperf -f hosts.txt -d /data -r dsN -D -v
+
+  # 测试磁盘延迟和 IOPS
+  dbcheckperf -h localhost -d /data -r l -v
+
+  # 查看 IO 统计信息
+  dbcheckperf -r i -v
+
+  # 查看 NUMA 信息
+  dbcheckperf -r u -v
+
+  # 查看内核参数
+  dbcheckperf -r k -v
+
+  # 测试网络质量（延迟、丢包）
+  dbcheckperf -h localhost -r q --net-quality-target 8.8.8.8 -v
+
+  # 查看磁盘详细信息
+  dbcheckperf -h localhost -d /data -r I -v`)
 }
 
 // runHardwareMode 运行硬件信息收集模式

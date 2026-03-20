@@ -34,6 +34,20 @@ type NetworkResult struct {
 	GRO string
 	// GSO Generic Segmentation Offload 状态
 	GSO string
+	// LatencyAvg 平均延迟 (ms)
+	LatencyAvg float64
+	// LatencyMax 最大延迟 (ms)
+	LatencyMax float64
+	// LatencyMin 最小延迟 (ms)
+	LatencyMin float64
+	// PacketLoss 丢包率 (%)
+	PacketLoss float64
+	// ErrorRate 错包率 (%)
+	ErrorRate float64
+	// TCPRetransmit TCP 重传率 (%)
+	TCPRetransmit float64
+	// MTU MTU 大小
+	MTU int
 }
 
 // NetworkChecker 网络性能检查器
@@ -478,4 +492,315 @@ func AutoDetectInterface() (string, error) {
 	}
 
 	return "", fmt.Errorf("未找到可用的网络接口")
+}
+
+// MeasureNetworkLatency 测量网络延迟
+// 使用 ping 命令测量到目标主机的延迟
+func MeasureNetworkLatency(host string, count int) (avg, max, min, loss float64, err error) {
+	if count <= 0 {
+		count = 10 // 默认 ping 10 次
+	}
+
+	cmd := exec.Command("ping", "-c", fmt.Sprintf("%d", count), "-W", "2", host)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// ping 命令返回非零退出码是正常的（如有丢包）
+		if len(output) == 0 {
+			return 0, 0, 0, 100, fmt.Errorf("ping 失败：%v", err)
+		}
+	}
+
+	return parsePingOutput(string(output))
+}
+
+// parsePingOutput 解析 ping 命令输出
+func parsePingOutput(output string) (avg, max, min, loss float64, err error) {
+	lines := strings.Split(output, "\n")
+
+	// 解析丢包率
+	for _, line := range lines {
+		if strings.Contains(line, "packet loss") {
+			re := regexp.MustCompile(`(\d+(?:\.\d+)?)%`)
+			matches := re.FindStringSubmatch(line)
+			if len(matches) >= 2 {
+				loss, _ = strconv.ParseFloat(matches[1], 64)
+			}
+		}
+
+		// 解析延迟统计 (rtt min/avg/max/mdev)
+		if strings.Contains(line, "rtt") && strings.Contains(line, "min/avg/max") {
+			re := regexp.MustCompile(`=\s*([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)`)
+			matches := re.FindStringSubmatch(line)
+			if len(matches) >= 4 {
+				min, _ = strconv.ParseFloat(matches[2], 64)
+				avg, _ = strconv.ParseFloat(matches[3], 64)
+				max, _ = strconv.ParseFloat(matches[4], 64)
+			}
+		}
+	}
+
+	if avg == 0 && loss < 100 {
+		// 尝试另一种格式
+		for _, line := range lines {
+			if strings.Contains(line, "time=") {
+				re := regexp.MustCompile(`time=([\d.]+)\s*ms`)
+				matches := re.FindAllStringSubmatch(line, -1)
+				if len(matches) > 0 {
+					var sum, count float64
+					for _, m := range matches {
+						if len(m) >= 2 {
+							t, _ := strconv.ParseFloat(m[1], 64)
+							sum += t
+							count++
+							if t < min || min == 0 {
+								min = t
+							}
+							if t > max {
+								max = t
+							}
+						}
+					}
+					if count > 0 {
+						avg = sum / count
+					}
+				}
+			}
+		}
+	}
+
+	if avg == 0 && loss < 100 {
+		return 0, 0, 0, loss, fmt.Errorf("无法解析延迟数据")
+	}
+
+	return avg, max, min, loss, nil
+}
+
+// GetPacketLoss 获取网络丢包率
+func GetPacketLoss(host string, count int) (float64, error) {
+	_, _, _, loss, err := MeasureNetworkLatency(host, count)
+	return loss, err
+}
+
+// GetPacketErrorRate 获取网络错包率
+func GetPacketErrorRate(iface string) (float64, error) {
+	if iface == "" {
+		var err error
+		iface, err = AutoDetectInterface()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	// 使用 ip -s link 命令
+	cmd := exec.Command("ip", "-s", "link", "show", iface)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	return parseIPStatsOutput(string(output))
+}
+
+// parseIPStatsOutput 解析 ip -s link 输出
+func parseIPStatsOutput(output string) (float64, error) {
+	lines := strings.Split(output, "\n")
+
+	var rxErrors, txErrors, rxPackets, txPackets uint64
+
+	for i, line := range lines {
+		if strings.Contains(line, "RX:") {
+			// 下一行包含统计信息
+			if i+1 < len(lines) {
+				fields := strings.Fields(lines[i+1])
+				if len(fields) >= 4 {
+					rxPackets, _ = strconv.ParseUint(fields[0], 10, 64)
+					rxErrors, _ = strconv.ParseUint(fields[2], 10, 64)
+				}
+			}
+		}
+		if strings.Contains(line, "TX:") {
+			// 下一行包含统计信息
+			if i+1 < len(lines) {
+				fields := strings.Fields(lines[i+1])
+				if len(fields) >= 4 {
+					txPackets, _ = strconv.ParseUint(fields[0], 10, 64)
+					txErrors, _ = strconv.ParseUint(fields[2], 10, 64)
+				}
+			}
+		}
+	}
+
+	totalPackets := rxPackets + txPackets
+	totalErrors := rxErrors + txErrors
+
+	if totalPackets == 0 {
+		return 0, nil
+	}
+
+	return float64(totalErrors) / float64(totalPackets) * 100, nil
+}
+
+// GetTCPRetransmit 获取 TCP 重传率
+func GetTCPRetransmit() (float64, error) {
+	// 尝试从 /proc/net/netstat 读取
+	data, err := os.ReadFile("/proc/net/netstat")
+	if err != nil {
+		return 0, err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var retransSegs, outSegs uint64
+
+	for i, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "TcpExt:") {
+			if i+1 < len(lines) {
+				fields := strings.Fields(lines[i+1])
+				// 查找 RetransSegs 和 OutSegs
+				for j, field := range fields {
+					if field == "RetransSegs" && j+1 < len(fields) {
+						retransSegs, _ = strconv.ParseUint(fields[j+1], 10, 64)
+					}
+					if field == "OutSegs" && j+1 < len(fields) {
+						outSegs, _ = strconv.ParseUint(fields[j+1], 10, 64)
+					}
+				}
+			}
+		}
+	}
+
+	if outSegs == 0 {
+		return 0, nil
+	}
+
+	return float64(retransSegs) / float64(outSegs) * 100, nil
+}
+
+// GetMTU 获取网卡 MTU 大小
+func GetMTU(iface string) (int, error) {
+	if iface == "" {
+		var err error
+		iface, err = AutoDetectInterface()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	// 使用 ip link 命令
+	cmd := exec.Command("ip", "link", "show", iface)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	// 解析 mtu 值
+	re := regexp.MustCompile(`mtu\s+(\d+)`)
+	matches := re.FindStringSubmatch(string(output))
+	if len(matches) >= 2 {
+		mtu, _ := strconv.Atoi(matches[1])
+		return mtu, nil
+	}
+
+	return 1500, nil // 默认 MTU
+}
+
+// GetNICQueueSize 获取网卡队列大小
+func GetNICQueueSize(iface string) (int, error) {
+	if iface == "" {
+		var err error
+		iface, err = AutoDetectInterface()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	// 读取 tx_queue_len
+	queuePath := fmt.Sprintf("/sys/class/net/%s/tx_queue_len", iface)
+	data, err := os.ReadFile(queuePath)
+	if err != nil {
+		return 0, err
+	}
+
+	queueLen, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	return queueLen, nil
+}
+
+// CollectNetworkQuality 收集网络质量信息
+func CollectNetworkQuality(host string) (map[string]interface{}, error) {
+	quality := make(map[string]interface{})
+
+	// 测量延迟
+	avgLat, maxLat, minLat, loss, err := MeasureNetworkLatency(host, 10)
+	if err != nil {
+		quality["error"] = err.Error()
+	} else {
+		quality["latency_avg"] = avgLat
+		quality["latency_max"] = maxLat
+		quality["latency_min"] = minLat
+		quality["packet_loss"] = loss
+	}
+
+	// 获取 MTU
+	mtu, err := GetMTU("")
+	if err != nil {
+		quality["mtu"] = "unknown"
+	} else {
+		quality["mtu"] = mtu
+	}
+
+	// 获取队列大小
+	queueSize, err := GetNICQueueSize("")
+	if err != nil {
+		quality["queue_size"] = "unknown"
+	} else {
+		quality["queue_size"] = queueSize
+	}
+
+	// 获取 TCP 重传率
+	retrans, err := GetTCPRetransmit()
+	if err != nil {
+		quality["tcp_retransmit"] = "unknown"
+	} else {
+		quality["tcp_retransmit"] = retrans
+	}
+
+	// 获取错包率
+	errorRate, err := GetPacketErrorRate("")
+	if err != nil {
+		quality["error_rate"] = "unknown"
+	} else {
+		quality["error_rate"] = errorRate
+	}
+
+	return quality, nil
+}
+
+// CollectRemoteNetworkQuality 收集远程主机网络质量信息
+func CollectRemoteNetworkQuality(host string) (map[string]interface{}, error) {
+	quality := make(map[string]interface{})
+
+	// 在远程主机执行 ping 测试
+	pingCmd := fmt.Sprintf("ping -c 10 -W 2 %s 2>&1", host)
+	output, err := common.RunSSHCommand(host, pingCmd)
+	if err != nil {
+		quality["error"] = err.Error()
+		return quality, err
+	}
+
+	avgLat, maxLat, minLat, loss, _ := parsePingOutput(output)
+	quality["latency_avg"] = avgLat
+	quality["latency_max"] = maxLat
+	quality["latency_min"] = minLat
+	quality["packet_loss"] = loss
+
+	// 获取 MTU
+	mtuCmd := "ip link show | grep mtu | head -1 | grep -oP 'mtu \\K\\d+'"
+	mtuOutput, err := common.RunSSHCommand(host, mtuCmd)
+	if err != nil {
+		quality["mtu"] = "unknown"
+	} else {
+		mtu, _ := strconv.Atoi(strings.TrimSpace(mtuOutput))
+		quality["mtu"] = mtu
+	}
+
+	return quality, nil
 }

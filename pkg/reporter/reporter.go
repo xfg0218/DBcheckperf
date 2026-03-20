@@ -782,3 +782,273 @@ func (r *Reporter) PrintHardwareResults(infos []*checker.RemoteHardwareInfo) {
 		fmt.Println()
 	}
 }
+
+// PrintLatencyResults 打印延迟测试结果
+func (r *Reporter) PrintLatencyResults(results []*checker.LatencyResult) {
+	fmt.Println()
+	fmt.Println("====================")
+	fmt.Println("==  磁盘延迟和 IOPS 测试结果")
+	fmt.Println("====================")
+	fmt.Println()
+
+	// 打印表头
+	header := fmt.Sprintf("%-20s %-10s %-12s %-12s %-12s %-12s %-12s %-12s %-12s",
+		"主机名", "块大小", "读延迟 (ms)", "写延迟 (ms)", "读 IOPS", "写 IOPS",
+		"读延迟最大", "写延迟最大", "测试目录")
+	fmt.Println(header)
+	fmt.Println(strings.Repeat("-", 120))
+
+	// 打印每行数据
+	for _, result := range results {
+		blockSize := fmt.Sprintf("%dKB", result.BlockSize/1024)
+		row := fmt.Sprintf("%-20s %-10s %-12.3f %-12.3f %-12.0f %-12.0f %-12.3f %-12.3f %-12s",
+			result.Host,
+			blockSize,
+			result.ReadLatencyAvg,
+			result.WriteLatencyAvg,
+			result.ReadIOPS,
+			result.WriteIOPS,
+			result.ReadLatencyMax,
+			result.WriteLatencyMax,
+			result.Dir)
+		fmt.Println(row)
+	}
+
+	fmt.Println()
+}
+
+// PrintIOStatsResults 打印 IO 统计结果
+func (r *Reporter) PrintIOStatsResults(stats []*checker.IOStats) {
+	fmt.Println()
+	fmt.Println("====================")
+	fmt.Println("==  IO 统计信息")
+	fmt.Println("====================")
+	fmt.Println()
+
+	// 打印表头
+	header := fmt.Sprintf("%-20s %-10s %-10s %-10s %-10s %-10s %-10s %-10s %-10s %-8s",
+		"设备", "读/s", "写/s", "读 KB/s", "写 KB/s", "等待 (ms)", "利用率", "队列长", "服务 (ms)", "饱和")
+	fmt.Println(header)
+	fmt.Println(strings.Repeat("-", 110))
+
+	// 打印每行数据
+	for _, stat := range stats {
+		utilization := fmt.Sprintf("%.1f%%", stat.Utilization)
+		saturation := ""
+		if stat.Utilization > 80 {
+			saturation = "⚠️"
+		}
+		row := fmt.Sprintf("%-20s %-10.1f %-10.1f %-10.1f %-10.1f %-10.2f %-10s %-10.2f %-10.2f %-8s",
+			stat.Device,
+			stat.ReadPerSec,
+			stat.WritePerSec,
+			stat.ReadKBPerSec,
+			stat.WriteKBPerSec,
+			stat.Await,
+			utilization,
+			stat.AvgQueueLength,
+			stat.Svctm,
+			saturation)
+		fmt.Println(row)
+	}
+
+	fmt.Println()
+}
+
+// PrintNUMAInfo 打印 NUMA 信息
+func (r *Reporter) PrintNUMAInfo(info *checker.NUMAInfo) {
+	fmt.Println()
+	fmt.Println("====================")
+	fmt.Println("==  NUMA 信息")
+	fmt.Println("====================")
+	fmt.Println()
+
+	fmt.Printf("主机名：%s\n", info.Host)
+	fmt.Printf("NUMA 节点数：%d\n", info.NodeCount)
+	fmt.Printf("总内存：%s\n", utils.FormatBytes(info.TotalMemory))
+	fmt.Println()
+
+	for i := 0; i < info.NodeCount; i++ {
+		fmt.Printf("节点 %d:\n", i)
+		fmt.Printf("  CPU 核心数：%d\n", info.CPUPerNode[i])
+		fmt.Printf("  内存：%s\n", utils.FormatBytes(info.MemoryPerNode[i]))
+		fmt.Printf("  空闲内存：%s\n", utils.FormatBytes(info.FreeMemoryPerNode[i]))
+		fmt.Println()
+	}
+
+	if len(info.CPUDistance) > 0 {
+		fmt.Println("CPU 距离矩阵:")
+		for i, row := range info.CPUDistance {
+			fmt.Printf("  节点 %d: %v\n", i, row)
+		}
+		fmt.Println()
+	}
+}
+
+// PrintKernelParams 打印内核参数
+func (r *Reporter) PrintKernelParams(params *checker.KernelParams) {
+	fmt.Println()
+	fmt.Println("====================")
+	fmt.Println("==  内核参数")
+	fmt.Println("====================")
+	fmt.Println()
+
+	fmt.Printf("主机名：%s\n\n", params.Host)
+
+	fmt.Println("VM 参数:")
+	fmt.Printf("  dirty_ratio:              %d%%\n", params.VM.DirtyRatio)
+	fmt.Printf("  dirty_background_ratio:   %d%%\n", params.VM.DirtyBackgroundRatio)
+	fmt.Printf("  swappiness:               %d\n", params.VM.Swappiness)
+	fmt.Printf("  overcommit_memory:        %d\n", params.VM.OvercommitMemory)
+	fmt.Printf("  min_free_kbytes:          %d KB\n", params.VM.MinFreeKbytes)
+	fmt.Printf("  transparent_hugepage:     %s\n", params.VM.TransparentHugepage)
+	fmt.Printf("  numa_balancing:           %d\n", params.VM.NumaBalancing)
+	fmt.Println()
+
+	fmt.Println("IO 参数:")
+	fmt.Printf("  read_ahead_kb:            %d KB\n", params.IO.ReadAheadKB)
+	fmt.Printf("  max_sectors_kb:           %d KB\n", params.IO.MaxSectorsKB)
+	fmt.Printf("  nr_requests:              %d\n", params.IO.NrRequests)
+	fmt.Printf("  scheduler:                %s\n", params.IO.Scheduler)
+	fmt.Println()
+
+	fmt.Println("网络参数:")
+	fmt.Printf("  somaxconn:                %d\n", params.Network.Somaxconn)
+	fmt.Printf("  netdev_max_backlog:       %d\n", params.Network.NetdevMaxBacklog)
+	fmt.Printf("  tcp_max_syn_backlog:      %d\n", params.Network.TcpMaxSynBacklog)
+	fmt.Printf("  tcp_max_tw_buckets:         %d\n", params.Network.TcpMaxTwBuckets)
+	fmt.Printf("  tcp_tw_reuse:             %d\n", params.Network.TcpTwReuse)
+	fmt.Printf("  tcp_keepalive_time:       %d 秒\n", params.Network.TcpKeepaliveTime)
+	fmt.Println()
+
+	// 检查并显示警告
+	warnings := r.checkKernelParams(params)
+	if len(warnings) > 0 {
+		fmt.Println("⚠️  警告:")
+		for _, w := range warnings {
+			fmt.Printf("  - %s\n", w)
+		}
+		fmt.Println()
+	}
+}
+
+// checkKernelParams 检查内核参数是否合理
+func (r *Reporter) checkKernelParams(params *checker.KernelParams) []string {
+	var warnings []string
+
+	if params.VM.DirtyRatio > 40 {
+		warnings = append(warnings, fmt.Sprintf("dirty_ratio=%d 过高，可能导致 IO 突发", params.VM.DirtyRatio))
+	}
+
+	if params.VM.Swappiness > 60 {
+		warnings = append(warnings, fmt.Sprintf("swappiness=%d 过高，可能导致频繁 swap", params.VM.Swappiness))
+	}
+
+	if strings.Contains(params.VM.TransparentHugepage, "[always]") {
+		warnings = append(warnings, "transparent_hugepage=always 可能影响数据库性能，建议设置为 madvise 或 never")
+	}
+
+	if params.VM.MinFreeKbytes < 102400 {
+		warnings = append(warnings, fmt.Sprintf("min_free_kbytes=%d 过低，建议设置为 102400 以上", params.VM.MinFreeKbytes))
+	}
+
+	return warnings
+}
+
+// PrintNetworkQuality 打印网络质量结果
+func (r *Reporter) PrintNetworkQuality(results []*checker.NetworkResult) {
+	fmt.Println()
+	fmt.Println("====================")
+	fmt.Println("==  网络质量测试")
+	fmt.Println("====================")
+	fmt.Println()
+
+	// 打印表头
+	header := fmt.Sprintf("%-20s %-20s %-12s %-12s %-12s %-10s %-10s %-8s",
+		"源主机", "目标主机", "延迟 (ms)", "延迟最大", "丢包率", "MTU", "重传率", "质量")
+	fmt.Println(header)
+	fmt.Println(strings.Repeat("-", 110))
+
+	// 打印每行数据
+	for _, result := range results {
+		quality := "良好"
+		if result.PacketLoss > 1 {
+			quality = "差"
+		} else if result.LatencyAvg > 10 {
+			quality = "一般"
+		}
+
+		lossStr := fmt.Sprintf("%.2f%%", result.PacketLoss)
+		if result.PacketLoss == 0 {
+			lossStr = "0%"
+		}
+
+		row := fmt.Sprintf("%-20s %-20s %-12.2f %-12.2f %-12s %-10d %-10.2f %-8s",
+			result.SourceHost,
+			result.DestHost,
+			result.LatencyAvg,
+			result.LatencyMax,
+			lossStr,
+			result.MTU,
+			result.TCPRetransmit,
+			quality)
+		fmt.Println(row)
+	}
+
+	fmt.Println()
+}
+
+// PrintDiskInfoResults 打印磁盘详细信息
+func (r *Reporter) PrintDiskInfoResults(results []*checker.DiskResult) {
+	fmt.Println()
+	fmt.Println("====================")
+	fmt.Println("==  磁盘详细信息")
+	fmt.Println("====================")
+	fmt.Println()
+
+	// 打印表头
+	header := fmt.Sprintf("%-20s %-12s %-8s %-20s %-15s %-15s %-10s %-10s",
+		"主机名", "设备", "类型", "型号", "容量", "文件系统", "可用空间", "inode")
+	fmt.Println(header)
+	fmt.Println(strings.Repeat("-", 120))
+
+	// 打印每行数据
+	for _, result := range results {
+		diskType := result.DiskType
+		if diskType == "" {
+			diskType = "unknown"
+		}
+
+		model := result.DiskModel
+		if len(model) > 18 {
+			model = model[:15] + "..."
+		}
+		if model == "" {
+			model = "unknown"
+		}
+
+		fs := result.FileSystem
+		if fs == "" {
+			fs = "unknown"
+		}
+
+		freeStr := utils.FormatBytes(result.FreeSpace)
+		inodeStr := fmt.Sprintf("%.1f%%", result.InodeUsage)
+		if result.InodeUsage == 0 {
+			inodeStr = "-"
+		}
+
+		row := fmt.Sprintf("%-20s %-12s %-8s %-20s %-15s %-15s %-10s %-10s",
+			result.Host,
+			result.Dir,
+			diskType,
+			model,
+			utils.FormatBytes(result.DiskCapacity),
+			fs,
+			freeStr,
+			inodeStr)
+		fmt.Println(row)
+	}
+
+	fmt.Println()
+}

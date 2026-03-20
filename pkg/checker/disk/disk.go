@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"dbcheckperf/pkg/checker/common"
@@ -52,6 +53,20 @@ type DiskResult struct {
 	BlockSize int64
 	// Scheduler 磁盘调度算法
 	Scheduler string
+	// DiskType 磁盘类型 (HDD/SSD/NVMe)
+	DiskType string
+	// DiskModel 磁盘型号
+	DiskModel string
+	// DiskCapacity 磁盘容量（字节）
+	DiskCapacity uint64
+	// FileSystem 文件系统类型
+	FileSystem string
+	// MountOptions 挂载选项
+	MountOptions string
+	// FreeSpace 可用空间（字节）
+	FreeSpace uint64
+	// InodeUsage inode 使用率 (%)
+	InodeUsage float64
 }
 
 // DiskChecker 磁盘性能检查器
@@ -827,4 +842,317 @@ func CollectRemoteDiskInfo(host, dir string) (string, int64, string) {
 	}
 
 	return device, blockSize, scheduler
+}
+
+// GetDiskType 获取磁盘类型 (HDD/SSD/NVMe)
+func GetDiskType(device string) string {
+	if device == "" || device == "unknown" {
+		return "unknown"
+	}
+
+	// 检查是否为 NVMe 设备
+	if strings.HasPrefix(device, "nvme") {
+		return "NVMe"
+	}
+
+	// 检查 rotational 文件，0 表示 SSD，1 表示 HDD
+	rotationalPath := fmt.Sprintf("/sys/block/%s/queue/rotational", device)
+	data, err := os.ReadFile(rotationalPath)
+	if err != nil {
+		return "unknown"
+	}
+
+	rotational := strings.TrimSpace(string(data))
+	if rotational == "0" {
+		return "SSD"
+	}
+	return "HDD"
+}
+
+// GetDiskModel 获取磁盘型号
+func GetDiskModel(device string) string {
+	if device == "" || device == "unknown" {
+		return "unknown"
+	}
+
+	// 尝试从 sysfs 读取型号
+	modelPath := fmt.Sprintf("/sys/block/%s/device/model", device)
+	data, err := os.ReadFile(modelPath)
+	if err == nil {
+		return strings.TrimSpace(string(data))
+	}
+
+	// 尝试使用 hdparm 获取型号
+	cmd := exec.Command("hdparm", "-I", "/dev/"+device)
+	output, err := cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "Model Number:") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) >= 2 {
+					return strings.TrimSpace(parts[1])
+				}
+			}
+		}
+	}
+
+	// 尝试使用 smartctl 获取型号
+	cmd = exec.Command("smartctl", "-i", "/dev/"+device)
+	output, err = cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "Device Model:") || strings.Contains(line, "Model Number:") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) >= 2 {
+					return strings.TrimSpace(parts[1])
+				}
+			}
+		}
+	}
+
+	return "unknown"
+}
+
+// GetDiskCapacity 获取磁盘容量（字节）
+func GetDiskCapacity(device string) uint64 {
+	if device == "" || device == "unknown" {
+		return 0
+	}
+
+	// 从 sysfs 读取大小（扇区数）
+	sizePath := fmt.Sprintf("/sys/block/%s/size", device)
+	data, err := os.ReadFile(sizePath)
+	if err != nil {
+		return 0
+	}
+
+	sectors, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0
+	}
+
+	// 获取扇区大小（字节）
+	sectorSizePath := fmt.Sprintf("/sys/block/%s/queue/hw_sector_size", device)
+	data, err = os.ReadFile(sectorSizePath)
+	if err != nil {
+		sectorSizePath = fmt.Sprintf("/sys/block/%s/queue/logical_block_size", device)
+		data, err = os.ReadFile(sectorSizePath)
+	}
+	if err != nil {
+		return 0
+	}
+
+	sectorSize, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		sectorSize = 512 // 默认扇区大小
+	}
+
+	return sectors * sectorSize
+}
+
+// GetFileSystemType 获取文件系统类型
+func GetFileSystemType(path string) string {
+	// 使用 stat -f 命令
+	cmd := exec.Command("stat", "-f", "-c", "%T", path)
+	output, err := cmd.Output()
+	if err == nil {
+		return strings.TrimSpace(string(output))
+	}
+
+	// 使用 df -T 命令
+	cmd = exec.Command("df", "-T", path)
+	output, err = cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		if len(lines) >= 2 {
+			fields := strings.Fields(lines[1])
+			if len(fields) >= 2 {
+				return fields[1]
+			}
+		}
+	}
+
+	return "unknown"
+}
+
+// GetMountOptions 获取挂载选项
+func GetMountOptions(path string) string {
+	// 读取 /proc/mounts
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return "unknown"
+	}
+
+	// 查找匹配的挂载点
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "unknown"
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 6 {
+			mountPoint := fields[1]
+			if mountPoint == "/" && absPath == "/" {
+				return fields[3]
+			}
+			if strings.HasPrefix(absPath, mountPoint+"/") || absPath == mountPoint {
+				return fields[3]
+			}
+		}
+	}
+
+	return "unknown"
+}
+
+// GetDiskFreeSpace 获取磁盘可用空间（字节）
+func GetDiskFreeSpace(path string) uint64 {
+	var stat syscall.Statfs_t
+	err := syscall.Statfs(path, &stat)
+	if err != nil {
+		return 0
+	}
+	return stat.Bavail * uint64(stat.Bsize)
+}
+
+// GetInodeUsage 获取 inode 使用率 (%)
+func GetInodeUsage(path string) float64 {
+	cmd := exec.Command("df", "-i", path)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	lines := strings.Split(string(output), "\n")
+	if len(lines) < 2 {
+		return 0
+	}
+
+	fields := strings.Fields(lines[1])
+	if len(fields) >= 5 {
+		usageStr := strings.TrimSuffix(fields[4], "%")
+		usage, err := strconv.ParseFloat(usageStr, 64)
+		if err == nil {
+			return usage
+		}
+	}
+
+	return 0
+}
+
+// CollectFullDiskInfo 收集完整的磁盘信息
+func CollectFullDiskInfo(dir string) (device, diskType, diskModel string, diskCapacity, blockSize uint64, scheduler, fileSystem, mountOptions string, freeSpace uint64, inodeUsage float64) {
+	device = GetDiskDevice(dir)
+	if device == "" || device == "unknown" {
+		return "unknown", "unknown", "unknown", 0, 0, "unknown", "unknown", "unknown", 0, 0
+	}
+
+	diskType = GetDiskType(device)
+	diskModel = GetDiskModel(device)
+	diskCapacity = GetDiskCapacity(device)
+	blockSize = uint64(GetDiskBlockSize(device))
+	scheduler = GetDiskScheduler(device)
+	fileSystem = GetFileSystemType(dir)
+	mountOptions = GetMountOptions(dir)
+	freeSpace = GetDiskFreeSpace(dir)
+	inodeUsage = GetInodeUsage(dir)
+
+	return device, diskType, diskModel, diskCapacity, blockSize, scheduler, fileSystem, mountOptions, freeSpace, inodeUsage
+}
+
+// CollectRemoteFullDiskInfo 收集远程主机完整磁盘信息
+func CollectRemoteFullDiskInfo(host, dir string) (device, diskType, diskModel string, diskCapacity, blockSize uint64, scheduler, fileSystem, mountOptions string, freeSpace uint64, inodeUsage float64) {
+	// 获取磁盘设备
+	deviceCmd := fmt.Sprintf("df %s | tail -1 | awk '{print $1}'", dir)
+	deviceOutput, err := common.RunSSHCommand(host, deviceCmd)
+	if err != nil {
+		return "unknown", "unknown", "unknown", 0, 0, "unknown", "unknown", "unknown", 0, 0
+	}
+
+	device = strings.TrimSpace(deviceOutput)
+	if device == "" {
+		return "unknown", "unknown", "unknown", 0, 0, "unknown", "unknown", "unknown", 0, 0
+	}
+
+	// 处理分区设备
+	devName := strings.TrimPrefix(device, "/dev/")
+	re := regexp.MustCompile(`^([a-zA-Z]+)\d+$`)
+	matches := re.FindStringSubmatch(devName)
+	if len(matches) >= 2 {
+		device = matches[1]
+	}
+
+	// 获取磁盘类型
+	diskTypeCmd := fmt.Sprintf("cat /sys/block/%s/queue/rotational 2>/dev/null || echo 2", device)
+	diskTypeOutput, _ := common.RunSSHCommand(host, diskTypeCmd)
+	diskTypeOutput = strings.TrimSpace(diskTypeOutput)
+	if strings.HasPrefix(device, "nvme") {
+		diskType = "NVMe"
+	} else if diskTypeOutput == "0" {
+		diskType = "SSD"
+	} else if diskTypeOutput == "1" {
+		diskType = "HDD"
+	} else {
+		diskType = "unknown"
+	}
+
+	// 获取磁盘型号
+	modelCmd := fmt.Sprintf("cat /sys/block/%s/device/model 2>/dev/null || hdparm -I /dev/%s 2>/dev/null | grep 'Model Number' | awk -F: '{print $2}' | xargs || echo unknown", device, device)
+	diskModel, _ = common.RunSSHCommand(host, modelCmd)
+	diskModel = strings.TrimSpace(diskModel)
+
+	// 获取磁盘容量
+	capacityCmd := fmt.Sprintf("cat /sys/block/%s/size 2>/dev/null", device)
+	sectorsStr, _ := common.RunSSHCommand(host, capacityCmd)
+	sectors, _ := strconv.ParseUint(strings.TrimSpace(sectorsStr), 10, 64)
+
+	sectorSizeCmd := fmt.Sprintf("cat /sys/block/%s/queue/hw_sector_size 2>/dev/null || echo 512", device)
+	sectorSizeStr2, _ := common.RunSSHCommand(host, sectorSizeCmd)
+	sectorSize, _ := strconv.ParseUint(strings.TrimSpace(sectorSizeStr2), 10, 64)
+	if sectorSize == 0 {
+		sectorSize = 512
+	}
+	diskCapacity = sectors * sectorSize
+
+	// 获取块大小
+	blockSizeCmd := fmt.Sprintf("cat /sys/block/%s/queue/logical_block_size 2>/dev/null || echo 512", device)
+	blockSizeStr, _ := common.RunSSHCommand(host, blockSizeCmd)
+	blockSize, _ = strconv.ParseUint(strings.TrimSpace(blockSizeStr), 10, 64)
+	if blockSize == 0 {
+		blockSize = 512
+	}
+
+	// 获取调度算法
+	schedulerCmd := fmt.Sprintf("cat /sys/block/%s/queue/scheduler 2>/dev/null | tr -d '[]' | awk '{print $1}' || echo unknown", device)
+	schedulerOutput, _ := common.RunSSHCommand(host, schedulerCmd)
+	scheduler = strings.TrimSpace(schedulerOutput)
+	re = regexp.MustCompile(`\[([^\]]+)\]`)
+	matches = re.FindStringSubmatch(schedulerOutput)
+	if len(matches) >= 2 {
+		scheduler = matches[1]
+	}
+
+	// 获取文件系统类型
+	fsCmd := fmt.Sprintf("df -T %s | tail -1 | awk '{print $2}'", dir)
+	fileSystem, _ = common.RunSSHCommand(host, fsCmd)
+	fileSystem = strings.TrimSpace(fileSystem)
+
+	// 获取挂载选项
+	mountCmd := fmt.Sprintf("df %s | tail -1 | awk '{print $6}'", dir)
+	mountOptions, _ = common.RunSSHCommand(host, mountCmd)
+	mountOptions = strings.TrimSpace(mountOptions)
+
+	// 获取可用空间
+	freeCmd := fmt.Sprintf("df -B1 %s | tail -1 | awk '{print $4}'", dir)
+	freeStr2, _ := common.RunSSHCommand(host, freeCmd)
+	freeSpace, _ = strconv.ParseUint(strings.TrimSpace(freeStr2), 10, 64)
+
+	// 获取 inode 使用率
+	inodeCmd := fmt.Sprintf("df -i %s | tail -1 | awk '{print $5}' | tr -d '%%'", dir)
+	inodeStr2, _ := common.RunSSHCommand(host, inodeCmd)
+	inodeUsage, _ = strconv.ParseFloat(strings.TrimSpace(inodeStr2), 64)
+
+	return device, diskType, diskModel, diskCapacity, blockSize, scheduler, fileSystem, mountOptions, freeSpace, inodeUsage
 }

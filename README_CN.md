@@ -8,8 +8,14 @@ dbcheckperf 是一个用 Go 语言编写的数据库性能检查工具，基于 
 
 - **磁盘 I/O 测试**: 使用 `dd` 命令测试顺序和随机读写性能，单次测试快速完成，使用 `oflag=direct` 和 `conv=fsync` 确保测试准确性
 - **随机读写测试**: 默认 4K 随机读写性能测试，使用 `dd` 命令配合 `seek/skip` 参数进行随机位置读写，100 次迭代快速完成
+- **磁盘延迟和 IOPS 测试**: 使用 `dd` 或 `fio` 测试磁盘读写延迟和 IOPS，支持自定义块大小
+- **磁盘详细信息**: 收集磁盘类型 (HDD/SSD/NVMe)、型号、容量、文件系统、可用空间、inode 使用率
 - **内存带宽测试**: 使用 STREAM 基准测试方法（Go 实现），实际执行 Copy/Scale/Add/Triad 内存操作测试
 - **网络性能测试**: 支持 iperf3/netperf/curl/TCP 流多种测试方法，自动选择最佳测试工具
+- **网络质量测试**: 测量网络延迟、丢包率、错包率、TCP 重传率、MTU 等指标
+- **IO 统计监控**: 从 /proc/diskstats 获取实时 IO 指标（r/s, w/s, await, %util 等）
+- **NUMA 信息**: 收集 NUMA 节点数、内存分布、CPU 亲和性、设备 NUMA 节点
+- **内核参数**: 收集 VM/IO/网络相关内核参数，自动检测不合理配置并告警
 - **硬件信息收集**: 收集 CPU 型号/核数/睿频、磁盘型号/厂家/总大小、RAID 配置信息、网卡详细信息
 - **系统信息收集**: 自动收集 CPU 核心数、内存大小、网卡速率等信息
 - **硬件检测**: 检测虚拟机/物理机、RAID 卡型号、条带大小、网卡绑定、队列大小等
@@ -61,7 +67,7 @@ dbcheckperf -d <临时目录>
 | `-D` | 显示每台主机的详细结果 | false |
 | `-f <主机文件>` | 包含主机列表的文件 | - |
 | `-h <主机名>` | 主机名（可多次指定） | - |
-| `-r <测试类型>` | 测试类型：d=磁盘，s=内存流，n/N/M=网络，H=硬件信息 | dsn |
+| `-r <测试类型>` | 测试类型：d=磁盘，s=内存流，n/N/M=网络，H=硬件，l=延迟/IOPS，i=IO 统计，u=NUMA，k=内核参数，q=网络质量，I=磁盘信息 | dsn |
 | `-S <文件大小>` | 磁盘 I/O 测试文件大小 | 2xRAM |
 | `-v` | 详细模式 | false |
 | `-V` | 非常详细模式 | false |
@@ -69,6 +75,9 @@ dbcheckperf -d <临时目录>
 | `--netperf` | 使用 netperf 进行网络测试 | false |
 | `--buffer-size <KB>` | 网络测试缓冲区大小 | 8KB |
 | `--random-bs <KB>` | 随机读写块大小 (KB) | 4KB |
+| `--latency-bs <KB>` | 延迟和 IOPS 测试块大小 (KB) | 4KB |
+| `--iostat-interval` | IO 统计采样间隔 | 1s |
+| `--net-quality-target` | 网络质量测试目标主机 | - |
 | `--version` | 显示版本号 | - |
 | `-?` | 显示帮助信息 | - |
 
@@ -82,6 +91,12 @@ dbcheckperf -d <临时目录>
 | `N` | 网络并行 | 同时向所有主机测试（需偶数台主机） |
 | `M` | 网络全矩阵 | 每台主机与其他所有主机互测 |
 | `H` | 硬件信息 | 收集和展示硬件配置信息 |
+| `l` | 延迟/IOPS | 测试磁盘读写延迟和 IOPS |
+| `i` | IO 统计 | 从 /proc/diskstats 获取实时 IO 指标 |
+| `u` | NUMA | 显示 NUMA 拓扑和内存分布信息 |
+| `k` | 内核参数 | 显示 VM/IO/网络相关内核参数 |
+| `q` | 网络质量 | 测试网络延迟、丢包率、重传率等 |
+| `I` | 磁盘信息 | 显示磁盘类型、型号、容量、文件系统等 |
 
 ## 使用示例
 
@@ -162,6 +177,62 @@ dbcheckperf -f hosts.txt -r n -d /tmp --duration 60s -v
 ```bash
 dbcheckperf -f hosts.txt -d /data -r dsN -D -v
 ```
+
+### 示例 13: 测试磁盘延迟和 IOPS
+
+```bash
+dbcheckperf -h localhost -d /data -r l -v
+```
+
+测试磁盘读写延迟和 IOPS 性能，使用默认 4KB 块大小。
+
+### 示例 14: 查看 IO 统计信息
+
+```bash
+dbcheckperf -r i -v
+```
+
+从 /proc/diskstats 获取实时 IO 统计信息，包括 r/s, w/s, await, %util 等。
+
+### 示例 15: 查看 NUMA 信息
+
+```bash
+dbcheckperf -r u -v
+```
+
+显示 NUMA 节点数、每节点 CPU/内存分布、CPU 距离矩阵。
+
+### 示例 16: 查看内核参数
+
+```bash
+dbcheckperf -r k -v
+```
+
+显示 VM/IO/网络相关内核参数，并自动检测不合理配置。
+
+### 示例 17: 测试网络质量
+
+```bash
+dbcheckperf -h localhost -r q --net-quality-target 8.8.8.8 -v
+```
+
+测量到目标主机的网络延迟、丢包率、TCP 重传率等指标。
+
+### 示例 18: 查看磁盘详细信息
+
+```bash
+dbcheckperf -h localhost -d /data -r I -v
+```
+
+显示磁盘类型 (HDD/SSD/NVMe)、型号、容量、文件系统、可用空间等信息。
+
+### 示例 19: 综合测试
+
+```bash
+dbcheckperf -h localhost -d /data -r dslIuk -v
+```
+
+一次性运行磁盘 I/O、内存带宽、网络、延迟、磁盘信息、NUMA 和内核参数测试。
 
 在所有主机上运行磁盘 I/O、内存带宽和并行网络测试。
 
@@ -374,13 +445,17 @@ dbcheckperf/
 │   └── config.go           # 配置管理
 └── pkg/
     ├── checker/            # 性能检查器（模块化）
-    │   ├── checker.go      # 主 API + 硬件模块
+    │   ├── checker.go      # 主 API 入口
     │   ├── checker_test.go # 测试文件
     │   ├── common/         # 公共工具（IP 解析、SSH）
-    │   ├── disk/           # 磁盘 I/O 测试
-    │   ├── network/        # 网络测试
+    │   ├── disk/           # 磁盘 I/O 测试 + 磁盘信息检测
+    │   ├── network/        # 网络测试 + 网络质量检测
     │   ├── memory/         # 内存带宽测试
-    │   └── system/         # 系统信息收集
+    │   ├── system/         # 系统信息收集
+    │   ├── latency/        # 磁盘延迟和 IOPS 测试
+    │   ├── iostat/         # IO 统计监控
+    │   ├── numa/           # NUMA 信息收集
+    │   └── kernel/         # 内核参数收集
     ├── reporter/
     │   └── reporter.go     # 报告生成器（表格输出）
     └── utils/
@@ -389,11 +464,15 @@ dbcheckperf/
 
 **模块说明**:
 - **common**: 公共工具函数（IP 地址解析、SSH 命令执行）
-- **disk**: 磁盘 I/O 测试（顺序读写、随机读写）
-- **network**: 网络性能测试（iperf3/netperf/curl/TCP 流）
+- **disk**: 磁盘 I/O 测试（顺序读写、随机读写）+ 磁盘类型/型号/容量/文件系统检测
+- **network**: 网络性能测试（iperf3/netperf/curl/TCP 流）+ 网络质量检测（延迟/丢包/重传）
 - **memory**: 内存带宽测试（STREAM 基准测试）
 - **system**: 系统信息收集（CPU、内存、磁盘、网络、虚拟化）
-- **checker.go**: 主 API 入口 + 硬件信息收集
+- **latency**: 磁盘延迟和 IOPS 测试（dd/fio）
+- **iostat**: IO 统计监控（/proc/diskstats）
+- **numa**: NUMA 信息收集（节点数、内存分布、CPU 亲和性）
+- **kernel**: 内核参数收集（VM/IO/网络参数）
+- **checker.go**: 主 API 入口，类型别名，向后兼容
 
 ## 性能阈值参考
 

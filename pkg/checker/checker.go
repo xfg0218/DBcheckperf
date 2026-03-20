@@ -6,8 +6,12 @@ package checker
 import (
 	"dbcheckperf/pkg/checker/common"
 	"dbcheckperf/pkg/checker/disk"
+	"dbcheckperf/pkg/checker/iostat"
+	"dbcheckperf/pkg/checker/kernel"
+	"dbcheckperf/pkg/checker/latency"
 	"dbcheckperf/pkg/checker/memory"
 	"dbcheckperf/pkg/checker/network"
+	"dbcheckperf/pkg/checker/numa"
 	"dbcheckperf/pkg/checker/system"
 )
 
@@ -31,6 +35,25 @@ type RAIDInfo = system.RAIDInfo
 type NICBondInfo = system.NICBondInfo
 type SystemChecker = system.SystemChecker
 
+// 延迟测试相关类型
+type LatencyResult = latency.LatencyResult
+type LatencyChecker = latency.LatencyChecker
+
+// IO 统计相关类型
+type IOStats = iostat.IOStats
+type IOStatChecker = iostat.IOStatChecker
+
+// NUMA 相关类型
+type NUMAInfo = numa.NUMAInfo
+type NUMAChecker = numa.NUMAChecker
+
+// 内核参数相关类型
+type KernelParams = kernel.KernelParams
+type VMParams = kernel.VMParams
+type IOParams = kernel.IOParams
+type NetworkParams = kernel.NetworkParams
+type KernelChecker = kernel.KernelChecker
+
 // ==================== 公共函数重定向 ====================
 
 // ResolveToIP 将主机名解析为 IP 地址
@@ -49,6 +72,18 @@ var NewStreamChecker = memory.NewStreamChecker
 
 // NewSystemChecker 创建新的系统信息检查器
 var NewSystemChecker = system.NewSystemChecker
+
+// NewLatencyChecker 创建新的延迟检查器
+var NewLatencyChecker = latency.NewLatencyChecker
+
+// NewIOStatChecker 创建新的 IO 统计检查器
+var NewIOStatChecker = iostat.NewIOStatChecker
+
+// NewNUMAChecker 创建新的 NUMA 检查器
+var NewNUMAChecker = numa.NewNUMAChecker
+
+// NewKernelChecker 创建新的内核参数检查器
+var NewKernelChecker = kernel.NewKernelChecker
 
 // ==================== Hardware 模块类型定义 ====================
 // 注意：Hardware 模块代码量大且耦合度高，保留在此文件中
