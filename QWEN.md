@@ -11,18 +11,44 @@ dbcheckperf/
 ├── cmd/
 │   └── main.go             # 主程序入口，CLI 命令行解析
 ├── go.mod                  # Go 模块定义
-├── README.md               # 项目文档
+├── README.md               # 英文项目文档
+├── README_CN.md            # 中文项目文档
 ├── QWEN.md                 # 本文件，AI 上下文文档
 ├── config/
 │   └── config.go           # 配置管理，定义 Config 结构体和测试类型
 └── pkg/
-    ├── checker/
-    │   └── checker.go      # 性能检查器（磁盘、网络、内存、系统）
+    ├── checker/            # 性能检查器（模块化，2026-03-20 重构）
+    │   ├── checker.go      # 主 API + Hardware 模块（380 行）
+    │   ├── checker_test.go # 测试文件（371 行，11 个测试用例）
+    │   ├── common/         # 公共工具函数（IP 解析、SSH 命令）
+    │   ├── disk/           # 磁盘 I/O 测试（顺序/随机读写）
+    │   ├── network/        # 网络性能测试（iperf3/netperf/curl）
+    │   ├── memory/         # 内存带宽测试（STREAM 基准）
+    │   └── system/         # 系统信息收集（CPU/内存/磁盘/网络）
     ├── reporter/
     │   └── reporter.go     # 报告生成器，表格格式化输出
     └── utils/
         └── utils.go        # 工具函数（字节转换、文件操作等）
 ```
+
+### 模块说明
+
+| 模块 | 文件 | 行数 | 功能描述 |
+|------|------|------|----------|
+| **common** | `common/common.go` | 92 | IP 地址解析、SSH 命令执行、主机名获取 |
+| **disk** | `disk/disk.go` | 618 | 磁盘顺序读写、随机读写测试 |
+| **network** | `network/network.go` | 319 | 网络性能测试（串行/并行/全矩阵模式） |
+| **memory** | `memory/memory.go` | 203 | 内存带宽测试（STREAM 基准） |
+| **system** | `system/system.go` | 555 | 系统信息收集（CPU、内存、磁盘、虚拟化等） |
+| **checker.go** | `checker.go` | 380 | 主 API 入口、类型别名、Hardware 模块 |
+
+### 重构历史
+
+- **2026-03-20**: 模块化重构 - 将 checker.go (4,433 行) 拆分为 6 个模块
+  - 主文件减少到 380 行（减少 91.4%）
+  - 总代码从 4,433 行减少到 2,167 行（减少 51.1%）
+  - 保持向后兼容的 API
+  - 所有测试通过（11 个测试用例 + 5 个基准测试）
 
 ## 核心功能
 
@@ -164,11 +190,31 @@ go build -o dbcheckperf ./cmd/main.go
 1. **注释**: 所有函数使用中文注释
 2. **包结构**:
    - `config`: 配置相关
-   - `pkg/checker`: 性能检查逻辑
+   - `pkg/checker`: 性能检查逻辑（模块化）
+     - `common`: 公共工具函数
+     - `disk`: 磁盘 I/O 测试
+     - `network`: 网络性能测试
+     - `memory`: 内存带宽测试
+     - `system`: 系统信息收集
    - `pkg/reporter`: 报告输出逻辑
    - `pkg/utils`: 通用工具函数
 3. **错误处理**: 使用 error 返回值，重要错误打印到 stderr
 4. **命名**: 使用 Go 标准命名约定
+5. **导入路径**:
+   ```go
+   import (
+       "dbcheckperf/pkg/checker/common"
+       "dbcheckperf/pkg/checker/disk"
+       "dbcheckperf/pkg/checker/network"
+       "dbcheckperf/pkg/checker/memory"
+       "dbcheckperf/pkg/checker/system"
+   )
+   ```
+6. **向后兼容**: 使用类型别名和变量重定向保持 API 不变
+   ```go
+   type DiskResult = disk.DiskResult
+   var NewDiskChecker = disk.NewDiskChecker
+   ```
 
 ## 依赖
 
@@ -179,13 +225,60 @@ go build -o dbcheckperf ./cmd/main.go
 
 - `gpcheckperf.md`: Greenplum gpcheckperf 工具参考文档
 
-## 文件更新
-
-- 每次代码修改后把相关功能更新README.md 和 README_CN.md
-
 ## 代码修复与提交
 
-- 当发现代码BUG时先进行提issue，然后根据问题进行分析和修复
+- 当发现代码 BUG 时先进行提issue，然后根据问题进行分析和修复
 - 代码修复后在自动提交到 GitHub 仓库
 - 在提交时自动过滤临时文件，测试文件，PLAN 文件等
 
+## 文件更新
+
+- 每次代码修改后把相关功能更新 README.md 和 README_CN.md 和 QWEN.md
+
+## 模块化架构（2026-03-20 起）
+
+### 导入示例
+
+```go
+package main
+
+import (
+    "dbcheckperf/pkg/checker"
+    "dbcheckperf/pkg/checker/common"
+    "dbcheckperf/pkg/checker/disk"
+    "dbcheckperf/pkg/checker/network"
+    "dbcheckperf/pkg/checker/memory"
+    "dbcheckperf/pkg/checker/system"
+)
+
+// 使用方式（保持向后兼容）
+diskChecker := checker.NewDiskChecker(...)
+networkChecker := checker.NewNetworkChecker(...)
+streamChecker := checker.NewStreamChecker(...)
+systemChecker := checker.NewSystemChecker()
+hardwareChecker := checker.NewHardwareChecker()
+
+// 直接使用子模块
+common.ResolveToIP("host1")
+```
+
+### 编译和测试
+
+```bash
+# 编译整个项目
+go build ./...
+
+# 测试 checker 包
+go test ./pkg/checker/... -v
+
+# 测试覆盖率
+go test ./pkg/checker/... -cover
+
+# 单独测试子模块
+go test ./pkg/checker/disk/...
+go test ./pkg/checker/network/...
+```
+
+### 相关文件
+
+- `pkg/checker/FINAL_REFACTOR_REPORT.md`: 模块化重构报告
