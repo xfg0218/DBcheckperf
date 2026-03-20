@@ -26,6 +26,14 @@ type NetworkResult struct {
 	Bandwidth float64
 	// Duration 测试持续时间（秒）
 	Duration float64
+	// TSO TCP Segmentation Offload 状态
+	TSO string
+	// LRO Large Receive Offload 状态
+	LRO string
+	// GRO Generic Receive Offload 状态
+	GRO string
+	// GSO Generic Segmentation Offload 状态
+	GSO string
 }
 
 // NetworkChecker 网络性能检查器
@@ -40,6 +48,8 @@ type NetworkChecker struct {
 	Verbose bool
 	// Iterations 测试迭代次数
 	Iterations int
+	// InterfaceName 网络接口名称（可选，留空自动检测）
+	InterfaceName string
 }
 
 // NewNetworkChecker 创建新的网络检查器
@@ -50,6 +60,18 @@ func NewNetworkChecker(duration time.Duration, bufferSizeKB int, useNetperf, ver
 		UseNetperf: useNetperf,
 		Verbose:    verbose,
 		Iterations: 3, // 默认测试 3 次取平均值
+	}
+}
+
+// NewNetworkCheckerWithInterface 创建新的网络检查器（指定网卡）
+func NewNetworkCheckerWithInterface(duration time.Duration, bufferSizeKB int, useNetperf, verbose bool, iface string) *NetworkChecker {
+	return &NetworkChecker{
+		Duration:      duration,
+		BufferSize:    bufferSizeKB,
+		UseNetperf:    useNetperf,
+		Verbose:       verbose,
+		Iterations:    3,
+		InterfaceName: iface,
 	}
 }
 
@@ -132,6 +154,15 @@ func (nc *NetworkChecker) testSingle(localHost, remoteHost string) (NetworkResul
 		result.Bandwidth = utils.Average(bandwidths)
 	} else {
 		result.Bandwidth = 0
+	}
+
+	// 获取网卡 TSO/LRO/GRO/GSO 特性
+	iface := nc.InterfaceName
+	if iface == "" {
+		iface, _ = AutoDetectInterface()
+	}
+	if iface != "" {
+		result.TSO, result.LRO, result.GRO, result.GSO, _ = GetNetworkOffloadFeatures(iface)
 	}
 
 	return result, nil
@@ -316,4 +347,135 @@ func (nc *NetworkChecker) estimateNetworkSpeed(remoteHost string) float64 {
 	}
 
 	return 0
+}
+
+// GetNetworkOffloadFeatures 获取网卡卸载功能状态（TSO/LRO/GRO/GSO）
+// 使用 ethtool 命令查询网卡特性
+func GetNetworkOffloadFeatures(iface string) (tso, lro, gro, gso string, err error) {
+	// 检查 ethtool 是否可用
+	if _, err := exec.LookPath("ethtool"); err != nil {
+		return "N/A", "N/A", "N/A", "N/A", fmt.Errorf("ethtool 不可用")
+	}
+
+	// 运行 ethtool -k 获取网卡特性
+	cmd := exec.Command("ethtool", "-k", iface)
+	output, err := cmd.Output()
+	if err != nil {
+		return "N/A", "N/A", "N/A", "N/A", fmt.Errorf("获取网卡 %s 特性失败：%v", iface, err)
+	}
+
+	outputStr := string(output)
+
+	// 解析各项特性
+	tso = parseFeature(outputStr, "tcp-segmentation-offload")
+	lro = parseFeature(outputStr, "large-receive-offload")
+	gro = parseFeature(outputStr, "generic-receive-offload")
+	gso = parseFeature(outputStr, "generic-segmentation-offload")
+
+	return tso, lro, gro, gso, nil
+}
+
+// parseFeature 解析 ethtool 输出中的特性状态
+func parseFeature(output, feature string) string {
+	// 查找特性行，格式如：tcp-segmentation-offload: on
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), feature+":") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return "N/A"
+}
+
+// CollectNetworkFeatures 收集网络接口特性信息
+func CollectNetworkFeatures(iface string) map[string]string {
+	features := make(map[string]string)
+
+	tso, lro, gro, gso, err := GetNetworkOffloadFeatures(iface)
+	if err != nil {
+		features["error"] = err.Error()
+		features["tso"] = "N/A"
+		features["lro"] = "N/A"
+		features["gro"] = "N/A"
+		features["gso"] = "N/A"
+		return features
+	}
+
+	features["interface"] = iface
+	features["tso"] = tso
+	features["lro"] = lro
+	features["gro"] = gro
+	features["gso"] = gso
+	features["error"] = ""
+
+	return features
+}
+
+// CollectRemoteNetworkFeatures 收集远程主机网络接口特性信息
+func CollectRemoteNetworkFeatures(host, iface string) (map[string]string, error) {
+	features := make(map[string]string)
+
+	// 通过 SSH 在远程主机执行 ethtool 命令
+	cmd := exec.Command("ssh", host, "ethtool", "-k", iface)
+	output, err := cmd.Output()
+	if err != nil {
+		features["error"] = fmt.Sprintf("获取远程网卡特性失败：%v", err)
+		features["tso"] = "N/A"
+		features["lro"] = "N/A"
+		features["gro"] = "N/A"
+		features["gso"] = "N/A"
+		return features, err
+	}
+
+	outputStr := string(output)
+
+	features["interface"] = iface
+	features["host"] = host
+	features["tso"] = parseFeature(outputStr, "tcp-segmentation-offload")
+	features["lro"] = parseFeature(outputStr, "large-receive-offload")
+	features["gro"] = parseFeature(outputStr, "generic-receive-offload")
+	features["gso"] = parseFeature(outputStr, "generic-segmentation-offload")
+	features["error"] = ""
+
+	return features, nil
+}
+
+// AutoDetectInterface 自动检测默认网络接口
+func AutoDetectInterface() (string, error) {
+	// 读取 /proc/net/route 获取默认路由接口
+	routeFile := "/proc/net/route"
+	data, err := os.ReadFile(routeFile)
+	if err != nil {
+		return "", fmt.Errorf("读取路由表失败：%v", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		// 查找默认路由（Destination 为 00000000）
+		if len(fields) >= 8 && fields[1] == "00000000" {
+			iface := fields[0]
+			if iface != "" {
+				return iface, nil
+			}
+		}
+	}
+
+	// 备用方法：读取 /sys/class/net 获取第一个非 lo 接口
+	netDir := "/sys/class/net"
+	entries, err := os.ReadDir(netDir)
+	if err != nil {
+		return "", fmt.Errorf("读取网络接口目录失败：%v", err)
+	}
+
+	for _, entry := range entries {
+		if entry.Name() != "lo" {
+			return entry.Name(), nil
+		}
+	}
+
+	return "", fmt.Errorf("未找到可用的网络接口")
 }
