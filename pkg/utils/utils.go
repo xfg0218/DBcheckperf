@@ -3,6 +3,7 @@
 package utils
 
 import (
+	"dbcheckperf/config"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -268,4 +269,74 @@ func CreateTestFile(filename string, size uint64) error {
 	}
 
 	return nil
+}
+
+// SSHAuthInfo SSH 认证信息
+type SSHAuthInfo struct {
+	Username string
+	Password string
+	Port     int
+}
+
+// ReadSSHAuthFile 从 SSH 认证文件读取主机认证信息
+// 文件格式：每行 hostname username password [port]
+// 示例：
+// 192.168.1.100 gpadmin password123 22
+// server3 root secret123 2222
+func ReadSSHAuthFile(filename string) (map[string]SSHAuthInfo, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	authMap := make(map[string]SSHAuthInfo)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		// 跳过空行和注释
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue // 跳过格式不正确的行
+		}
+
+		hostname := fields[0]
+		username := fields[1]
+		password := fields[2]
+		port := 22 // 默认 SSH 端口
+
+		if len(fields) >= 4 {
+			if p, err := strconv.Atoi(fields[3]); err == nil {
+				port = p
+			}
+		}
+
+		authMap[hostname] = SSHAuthInfo{
+			Username: username,
+			Password: password,
+			Port:     port,
+		}
+	}
+
+	return authMap, nil
+}
+
+// SSHAuthInfoToConfig 将 utils.SSHAuthInfo 转换为 config.SSHAuthInfo
+func SSHAuthInfoToConfig(auth SSHAuthInfo) config.SSHAuthInfo {
+	return config.SSHAuthInfo{
+		Username: auth.Username,
+		Password: auth.Password,
+		Port:     auth.Port,
+	}
+}
+
+// SSHAuthInfoMapToConfig 将 utils.SSHAuthInfo map 转换为 config.SSHAuthInfo map
+func SSHAuthInfoMapToConfig(authMap map[string]SSHAuthInfo) map[string]config.SSHAuthInfo {
+	result := make(map[string]config.SSHAuthInfo)
+	for k, v := range authMap {
+		result[k] = SSHAuthInfoToConfig(v)
+	}
+	return result
 }

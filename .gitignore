@@ -25,3 +25,6 @@ go.work.sum
 # 临时文件
 *.tmp
 *.log
+
+.qwen/
+gha-creds-*.json

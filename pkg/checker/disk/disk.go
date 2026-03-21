@@ -314,6 +314,11 @@ func (dc *DiskChecker) runSSHCommand(host string, command string) (string, error
 	return common.RunSSHCommand(host, command)
 }
 
+// runSSHCommandWithAuth 通过 SSH 密码认证执行远程命令并返回输出
+func (dc *DiskChecker) runSSHCommandWithAuth(hostname, username, password string, port int, command string) (string, error) {
+	return common.RunSSHCommandWithAuth(hostname, username, password, port, command)
+}
+
 // runSSHCommandWithTime 通过 SSH 执行远程命令并返回输出和执行时间
 func (dc *DiskChecker) runSSHCommandWithTime(host string, command string) (string, float64, error) {
 	start := time.Now()
@@ -322,10 +327,26 @@ func (dc *DiskChecker) runSSHCommandWithTime(host string, command string) (strin
 	return output, duration, err
 }
 
+// runSSHCommandWithAuthAndTime 通过 SSH 密码认证执行远程命令并返回输出和执行时间
+func (dc *DiskChecker) runSSHCommandWithAuthAndTime(hostname, username, password string, port int, command string) (string, float64, error) {
+	start := time.Now()
+	output, err := dc.runSSHCommandWithAuth(hostname, username, password, port, command)
+	duration := time.Since(start).Seconds()
+	return output, duration, err
+}
+
 // dropRemoteCaches 清空远程主机系统缓存
 func (dc *DiskChecker) dropRemoteCaches(host string) {
 	// 尝试清空页面缓存、dentries 和 inodes
 	dc.runSSHCommand(host, "sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true")
+	// 短暂等待让缓存清空生效
+	time.Sleep(100 * time.Millisecond)
+}
+
+// dropRemoteCachesWithAuth 清空远程主机系统缓存（密码认证）
+func (dc *DiskChecker) dropRemoteCachesWithAuth(hostname, username, password string, port int) {
+	// 尝试清空页面缓存、dentries 和 inodes
+	dc.runSSHCommandWithAuth(hostname, username, password, port, "sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true")
 	// 短暂等待让缓存清空生效
 	time.Sleep(100 * time.Millisecond)
 }
@@ -413,6 +434,204 @@ func (dc *DiskChecker) runRemoteRandomRead(host string, testFile string, blockSi
 	}
 
 	return totalBytes, nil
+}
+
+// runRemoteRandomTestWithAuth 执行远程随机读写测试（密码认证）
+func (dc *DiskChecker) runRemoteRandomTestWithAuth(hostname, username, password string, port int, testFile string) (uint64, float64, uint64, float64, error) {
+	// 获取文件大小
+	sizeOutput, err := dc.runSSHCommandWithAuth(hostname, username, password, port, fmt.Sprintf("stat -c %%s %s 2>/dev/null || stat -f %%z %s 2>/dev/null", testFile, testFile))
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("无法获取远程测试文件大小：%v", err)
+	}
+	fileSize, _ := strconv.ParseUint(strings.TrimSpace(sizeOutput), 10, 64)
+
+	// 随机读写块大小
+	randBlockSize := dc.RandBlockSize * 1024 // 转换为字节
+	randCount := 100                         // 随机操作次数（优化为 100 次，快速完成）
+
+	// 随机写入测试
+	randWriteStart := time.Now()
+	randWriteBytes, err := dc.runRemoteRandomWriteWithAuth(hostname, username, password, port, testFile, randBlockSize, randCount, fileSize)
+	randWriteDuration := time.Since(randWriteStart).Seconds()
+
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("远程随机写入测试失败：%v", err)
+	}
+
+	// 清空远程缓存
+	dc.dropRemoteCachesWithAuth(hostname, username, password, port)
+
+	// 随机读取测试
+	randReadStart := time.Now()
+	randReadBytes, err := dc.runRemoteRandomReadWithAuth(hostname, username, password, port, testFile, randBlockSize, randCount, fileSize)
+	randReadDuration := time.Since(randReadStart).Seconds()
+
+	if err != nil {
+		return randWriteBytes, randWriteDuration, 0, 0, fmt.Errorf("远程随机读取测试失败：%v", err)
+	}
+
+	return randWriteBytes, randWriteDuration, randReadBytes, randReadDuration, nil
+}
+
+// runRemoteRandomWriteWithAuth 执行远程随机写入测试（密码认证）
+func (dc *DiskChecker) runRemoteRandomWriteWithAuth(hostname, username, password string, port int, testFile string, blockSize, count int, fileSize uint64) (uint64, error) {
+	totalBytes := uint64(0)
+
+	for i := 0; i < count; i++ {
+		// 计算随机偏移量（以块为单位）
+		maxBlock := int64(fileSize) / int64(blockSize)
+		offset := int64(0)
+		if maxBlock > 1 {
+			offset = time.Now().UnixNano() % maxBlock
+		}
+
+		// 使用 dd 进行随机位置写入
+		cmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=1 seek=%d oflag=direct conv=notrunc,fsync 2>/dev/null",
+			testFile, blockSize, offset)
+		_, err := dc.runSSHCommandWithAuth(hostname, username, password, port, cmd)
+		if err == nil {
+			totalBytes += uint64(blockSize)
+		}
+	}
+
+	return totalBytes, nil
+}
+
+// runRemoteRandomReadWithAuth 执行远程随机读取测试（密码认证）
+func (dc *DiskChecker) runRemoteRandomReadWithAuth(hostname, username, password string, port int, testFile string, blockSize, count int, fileSize uint64) (uint64, error) {
+	totalBytes := uint64(0)
+
+	for i := 0; i < count; i++ {
+		// 计算随机偏移量（以块为单位）
+		maxBlock := int64(fileSize) / int64(blockSize)
+		offset := int64(0)
+		if maxBlock > 1 {
+			offset = time.Now().UnixNano() % maxBlock
+		}
+
+		// 使用 dd 进行随机位置读取
+		cmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d count=1 skip=%d iflag=direct 2>/dev/null",
+			testFile, blockSize, offset)
+		_, err := dc.runSSHCommandWithAuth(hostname, username, password, port, cmd)
+		if err == nil {
+			totalBytes += uint64(blockSize)
+		}
+	}
+
+	return totalBytes, nil
+}
+
+// RunRemoteWithAuth 通过 SSH 密码认证在远程主机执行磁盘 I/O 测试
+func (dc *DiskChecker) RunRemoteWithAuth(hostname, username, password string, port int, dir string) (*DiskResult, error) {
+	// 将主机名解析为 IP 地址
+	resolvedHost := common.ResolveToIP(hostname)
+
+	result := &DiskResult{
+		Host: resolvedHost,
+		Dir:  dir,
+	}
+
+	// 收集远程磁盘信息（块大小和调度算法）
+	device, blockSize, scheduler := CollectRemoteDiskInfoWithAuth(hostname, username, password, port, dir)
+	result.BlockSize = blockSize
+	result.Scheduler = scheduler
+
+	if dc.Verbose {
+		fmt.Printf("远程磁盘设备：%s, 块大小：%d 字节，调度算法：%s\n", device, blockSize, scheduler)
+	}
+
+	// 计算测试文件大小
+	testSize := dc.FileSize
+	if testSize == 0 {
+		// 默认使用 2 倍 RAM，远程主机需要通过 SSH 获取
+		ramStr, err := dc.runSSHCommandWithAuth(hostname, username, password, port, "free -b | grep Mem | awk '{print $2}'")
+		if err != nil {
+			ramStr = "2147483648" // 默认 2GB
+		}
+		ram, _ := strconv.ParseUint(strings.TrimSpace(ramStr), 10, 64)
+		if ram == 0 {
+			ram = 2 * 1024 * 1024 * 1024
+		}
+		testSize = ram
+	}
+
+	// 计算块大小和计数
+	ioBlockSize := dc.BlockSize * 1024 // 转换为字节
+	count := int(testSize / uint64(ioBlockSize))
+	if count == 0 {
+		count = 1
+	}
+
+	// 生成测试文件名
+	testFile := path.Join(dir, fmt.Sprintf("dd_test_%d", time.Now().UnixNano()))
+
+	if dc.Verbose {
+		fmt.Printf("远程磁盘测试：%s@%s\n", testFile, hostname)
+	}
+
+	// 确保测试完成后清理文件
+	defer func() {
+		dc.runSSHCommandWithAuth(hostname, username, password, port, fmt.Sprintf("rm -f %s", testFile))
+	}()
+
+	// 执行写入测试
+	writeCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=%d oflag=direct conv=fsync 2>&1",
+		testFile, ioBlockSize, count)
+	writeOutput, writeTime, err := dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, writeCmd)
+	var writeBytes uint64
+	if err == nil {
+		writeBytes = dc.parseDDOutput(writeOutput)
+		if writeBytes == 0 {
+			writeBytes = uint64(ioBlockSize * count)
+		}
+	}
+
+	// 清空远程缓存
+	dc.dropRemoteCachesWithAuth(hostname, username, password, port)
+
+	// 执行读取测试
+	readCmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d iflag=direct 2>&1", testFile, ioBlockSize)
+	readOutput, readTime, err := dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, readCmd)
+	var readBytes uint64
+	if err == nil {
+		readBytes = dc.parseDDOutput(readOutput)
+		if readBytes == 0 {
+			readBytes = writeBytes
+		}
+	}
+
+	// 设置顺序读写结果
+	if writeTime > 0 {
+		result.WriteTime = writeTime
+		result.WriteBytes = writeBytes
+		result.WriteBandwidth = float64(writeBytes) / writeTime / (1024 * 1024)
+	}
+
+	if readTime > 0 {
+		result.ReadTime = readTime
+		result.ReadBytes = readBytes
+		result.ReadBandwidth = float64(readBytes) / readTime / (1024 * 1024)
+	}
+
+	// 执行随机读写测试
+	randWriteBytes, randWriteTime, randReadBytes, randReadTime, err := dc.runRemoteRandomTestWithAuth(hostname, username, password, port, testFile)
+	if err == nil && dc.Verbose {
+		fmt.Printf("远程随机读写测试完成\n")
+	}
+
+	// 计算随机读写带宽
+	if randWriteTime > 0 {
+		result.RandWriteTime = randWriteTime
+		result.RandWriteBytes = randWriteBytes
+		result.RandWriteBandwidth = float64(randWriteBytes) / randWriteTime / (1024 * 1024)
+	}
+	if randReadTime > 0 {
+		result.RandReadTime = randReadTime
+		result.RandReadBytes = randReadBytes
+		result.RandReadBandwidth = float64(randReadBytes) / randReadTime / (1024 * 1024)
+	}
+
+	return result, nil
 }
 
 // runWriteTest 执行单次写入测试
@@ -825,6 +1044,70 @@ func CollectRemoteDiskInfo(host, dir string) (string, int64, string) {
 	// 获取调度算法
 	schedulerCmd := fmt.Sprintf("cat /sys/block/%s/queue/scheduler 2>/dev/null | tr -d '[]' | awk '{print $1}' || echo unknown", device)
 	schedulerOutput, err := common.RunSSHCommand(host, schedulerCmd)
+	if err != nil {
+		schedulerOutput = "unknown"
+	}
+	scheduler := strings.TrimSpace(schedulerOutput)
+	// 解析当前调度算法（方括号内的值）
+	re := regexp.MustCompile(`\[([^\]]+)\]`)
+	matches := re.FindStringSubmatch(schedulerOutput)
+	if len(matches) >= 2 {
+		scheduler = matches[1]
+	} else {
+		parts := strings.Fields(schedulerOutput)
+		if len(parts) > 0 {
+			scheduler = parts[0]
+		}
+	}
+
+	return device, blockSize, scheduler
+}
+
+// CollectRemoteDiskInfoWithAuth 收集远程主机的磁盘信息（密码认证）
+func CollectRemoteDiskInfoWithAuth(hostname, username, password string, port int, dir string) (string, int64, string) {
+	// 获取磁盘设备
+	deviceCmd := fmt.Sprintf("df %s | tail -1 | awk '{print $1}'", dir)
+	deviceOutput, err := common.RunSSHCommandWithAuth(hostname, username, password, port, deviceCmd)
+	if err != nil {
+		return "unknown", 0, "unknown"
+	}
+
+	device := strings.TrimSpace(deviceOutput)
+	if device == "" || strings.HasPrefix(device, "/dev/mapper/") {
+		// LVM 或其他特殊设备
+		device = strings.TrimSpace(device)
+		if device == "" {
+			device = "unknown"
+		}
+	} else {
+		// 处理分区设备
+		devName := strings.TrimPrefix(device, "/dev/")
+		re := regexp.MustCompile(`^([a-zA-Z]+)\d+$`)
+		matches := re.FindStringSubmatch(devName)
+		if len(matches) >= 2 {
+			device = matches[1]
+		}
+		re = regexp.MustCompile(`^(nvme\d+n\d+)p?\d*$`)
+		matches = re.FindStringSubmatch(devName)
+		if len(matches) >= 2 {
+			device = matches[1]
+		}
+	}
+
+	// 获取块大小
+	blockSizeCmd := fmt.Sprintf("cat /sys/block/%s/queue/hw_sector_size 2>/dev/null || cat /sys/block/%s/queue/logical_block_size 2>/dev/null || echo 512", device, device)
+	blockSizeOutput, err := common.RunSSHCommandWithAuth(hostname, username, password, port, blockSizeCmd)
+	if err != nil {
+		blockSizeOutput = "512"
+	}
+	blockSize, _ := strconv.ParseInt(strings.TrimSpace(blockSizeOutput), 10, 64)
+	if blockSize == 0 {
+		blockSize = 512
+	}
+
+	// 获取调度算法
+	schedulerCmd := fmt.Sprintf("cat /sys/block/%s/queue/scheduler 2>/dev/null | tr -d '[]' | awk '{print $1}' || echo unknown", device)
+	schedulerOutput, err := common.RunSSHCommandWithAuth(hostname, username, password, port, schedulerCmd)
 	if err != nil {
 		schedulerOutput = "unknown"
 	}

@@ -129,7 +129,17 @@ func main() {
 					} else {
 						// 远程主机，通过 SSH 运行
 						diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
-						result, err = diskChecker.RunRemote(host, dir)
+						// 如果指定了 SSH 认证文件，使用密码认证
+						if cfg.SSHAuthMap != nil {
+							if authInfo, ok := cfg.SSHAuthMap[host]; ok {
+								result, err = diskChecker.RunRemoteWithAuth(host, authInfo.Username, authInfo.Password, authInfo.Port, dir)
+							} else {
+								// 如果没有找到认证信息，尝试使用免密 SSH
+								result, err = diskChecker.RunRemote(host, dir)
+							}
+						} else {
+							result, err = diskChecker.RunRemote(host, dir)
+						}
 					}
 
 					if err != nil {
@@ -270,6 +280,7 @@ func parseFlags() *config.Config {
 	var durationStr string
 
 	flag.StringVar(&cfg.HostFile, "f", "", "包含主机列表的文件路径")
+	flag.StringVar(&cfg.SSHAuthFile, "F", "", "SSH 认证配置文件路径（格式：hostname username password [port]），指定此选项时不需要 -f")
 	flag.StringVar(&testTypesStr, "r", "dsn", "测试类型：d=磁盘，s=内存流，n/N/M=网络 (串行/并行/全矩阵)，l=延迟/IOPS，i=IO 统计，u=NUMA，k=内核参数，q=网络质量，I=磁盘信息，H=硬件信息")
 	flag.IntVar(&cfg.BlockSize, "B", 32, "磁盘 I/O 测试块大小 (KB)")
 	flag.StringVar(&cfg.FileSize, "S", "2xRAM", "磁盘 I/O 测试文件大小 (KB/MB/GB)")
@@ -310,6 +321,22 @@ func parseFlags() *config.Config {
 
 	// 设置主机和目录
 	cfg.Hosts = hosts
+
+	// 如果指定了 SSH 认证文件，从中读取主机列表和认证信息
+	if cfg.SSHAuthFile != "" {
+		authMap, err := utils.ReadSSHAuthFile(cfg.SSHAuthFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "错误：无法读取 SSH 认证文件：%v\n", err)
+			os.Exit(1)
+		}
+		cfg.SSHAuthMap = utils.SSHAuthInfoMapToConfig(authMap)
+
+		// 从认证文件中提取主机列表
+		for hostname := range authMap {
+			cfg.Hosts = append(cfg.Hosts, hostname)
+		}
+	}
+
 	normalizedTestDirs := make([]string, 0, len(testDirs))
 	for _, dir := range testDirs {
 		normalizedDir := utils.NormalizeDirPath(dir)
@@ -427,11 +454,16 @@ func printUsage() {
 
   dbcheckperf -r H  收集硬件信息
 
+  dbcheckperf -d <测试目录> -F <SSH 认证文件> [-r ds] [-B <块大小>] [-S <文件大小>] [-D] [-v|-V]
+       使用 SSH 密码认证测试远程主机（不需要 SSH 免密配置）
+
 选项:
   -B <块大小>         磁盘 I/O 测试块大小 (KB)，默认 32KB，最大 1MB
   -d <目录>           测试目录（可多次指定）
   -D                  显示每台主机的详细结果
   -f <主机文件>       包含主机列表的文件（每行一个主机）
+  -F <SSH 认证文件>   SSH 认证配置文件（格式：hostname username password [port]）
+                      指定此选项时不需要 -f，文件第一列为 hostname 或 IP 地址
   -h <主机名>         主机名（可多次指定）
   -r <测试类型>       测试类型：
                         d=磁盘 I/O, s=内存流，n/N/M=网络 (串行/并行/全矩阵)
@@ -481,6 +513,14 @@ func printUsage() {
 
   # 组合磁盘、内存和网络并行测试
   dbcheckperf -f hosts.txt -d /data -r dsN -D -v
+
+  # 使用 SSH 密码认证测试（不需要 SSH 免密）
+  dbcheckperf -F ssh_auth.txt -d /data -r ds
+
+  # ssh_auth.txt 文件格式示例：
+  # 192.168.1.100 gpadmin password123 22
+  # 192.168.1.101 gpadmin password456 22
+  # server3 root secret123 2222
 
   # 测试磁盘延迟和 IOPS
   dbcheckperf -h localhost -d /data -r l -v

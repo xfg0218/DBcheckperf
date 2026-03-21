@@ -39,8 +39,8 @@ dbcheckperf/
 
 | 模块 | 文件 | 行数 | 功能描述 |
 |------|------|------|----------|
-| **common** | `common/common.go` | 92 | IP 地址解析、SSH 命令执行、主机名获取 |
-| **disk** | `disk/disk.go` | 1160 | 磁盘顺序读写、随机读写、磁盘类型/型号/容量/文件系统检测 |
+| **common** | `common/common.go` | ~160 | IP 地址解析、SSH 命令执行（支持免密和密码认证）、主机名获取 |
+| **disk** | `disk/disk.go` | ~1450 | 磁盘顺序读写、随机读写、磁盘类型/型号/容量/文件系统检测（支持 SSH 密码认证） |
 | **network** | `network/network.go` | 680 | 网络性能测试（串行/并行/全矩阵模式）+ 网络质量检测（延迟/丢包/重传） |
 | **memory** | `memory/memory.go` | 203 | 内存带宽测试（STREAM 基准） |
 | **system** | `system/system.go` | 555 | 系统信息收集（CPU、内存、磁盘、虚拟化、RAID、网卡绑定等） |
@@ -49,8 +49,17 @@ dbcheckperf/
 | **numa** | `numa/numa.go` | 480 | NUMA 节点信息、内存分布、CPU 亲和性 |
 | **kernel** | `kernel/kernel.go` | 532 | 内核参数收集（VM/IO/网络参数，支持告警检查） |
 | **checker.go** | `checker.go` | 420 | 主 API 入口、类型别名、向后兼容 |
+| **utils** | `utils/utils.go` | ~340 | 工具函数（字节转换、文件操作、SSH 认证文件解析等） |
 
 ### 重构和增强历史
+
+- **2026-03-20**: SSH 密码认证功能增强
+  - 新增 `-F` 命令行选项支持 SSH 认证配置文件
+  - 新增 `pkg/checker/common/common.go` SSH 密码认证函数
+  - 新增 `pkg/checker/disk/disk.go` 密码认证远程测试方法
+  - 新增 `pkg/utils/utils.go` SSH 认证文件解析功能
+  - 添加 `golang.org/x/crypto` 依赖
+  - 支持无 SSH 免密登录情况下的远程主机测试
 
 - **2026-03-20**: 模块化重构 - 将 checker.go (4,433 行) 拆分为 6 个模块
   - 主文件减少到 380 行（减少 91.4%）
@@ -208,6 +217,32 @@ dbcheckperf/
   - tcp_tw_reuse / tcp_keepalive_time
 - **告警检查**: 自动检测不合理的参数配置
 
+### 4.4 SSH 密码认证支持 (`-F`)
+- **功能说明**:
+  - 支持在没有配置 SSH 免密登录的情况下测试远程主机
+  - 通过 SSH 密码认证执行远程命令
+  - 使用 golang.org/x/crypto/ssh 实现原生 SSH 客户端
+- **SSH 认证文件格式**:
+  ```
+  # 格式：hostname username password [port]
+  192.168.1.100 gpadmin password123 22
+  192.168.1.101 gpadmin password456 22
+  server3 root secret123 2222
+  ```
+- **使用示例**:
+  ```bash
+  # 使用 SSH 密码认证测试远程主机
+  dbcheckperf -F ssh_auth.txt -d /data -r ds
+  
+  # 测试磁盘、内存和网络
+  dbcheckperf -F ssh_auth.txt -d /tmp -r dsn -v
+  ```
+- **注意事项**:
+  - 指定 `-F` 选项后，不需要再使用 `-f` 选项
+  - 认证文件第一列为 hostname 或 IP 地址
+  - 支持自定义 SSH 端口（默认为 22）
+  - 密码以明文存储在认证文件中，请注意文件权限安全（建议 chmod 600）
+
 ### 5. 硬件信息收集 (`-r H`)
 - **CPU 信息**:
   - CPU 型号
@@ -262,6 +297,7 @@ go build -o dbcheckperf ./cmd/main.go
 |------|------|--------|
 | `-d <目录>` | 测试目录（可多次指定） | 必需 |
 | `-f <主机文件>` | 主机列表文件 | - |
+| `-F <SSH 认证文件>` | SSH 认证配置文件（格式：hostname username password [port]） | - |
 | `-h <主机名>` | 主机名（可多次指定） | - |
 | `-r <类型>` | 测试类型：d=磁盘，s=内存流，n/N/M=网络，H=硬件，l=延迟/IOPS，i=IO 统计，u=NUMA，k=内核参数，q=网络质量，I=磁盘信息 | dsn |
 | `-B <KB>` | 磁盘块大小 | 32 |
@@ -335,7 +371,7 @@ go build -o dbcheckperf ./cmd/main.go
 ## 依赖
 
 - Go 1.24+
-- 无外部依赖（仅使用标准库）
+- golang.org/x/crypto (SSH 密码认证支持)
 
 ## 相关文件
 

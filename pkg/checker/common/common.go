@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // ResolveToIP 将主机名解析为 IP 地址
@@ -89,4 +91,65 @@ func runSSHCommandWithTimeout(host string, command string, timeout time.Duration
 		return "", fmt.Errorf("SSH 命令执行失败：%v", err)
 	}
 	return string(output), nil
+}
+
+// RunSSHCommandWithAuth 通过 SSH 密码认证执行远程命令并返回输出
+// 使用 golang.org/x/crypto/ssh 实现原生 SSH 客户端
+func RunSSHCommandWithAuth(hostname, username, password string, port int, command string) (string, error) {
+	return RunSSHCommandWithAuthTimeout(hostname, username, password, port, command, 30*time.Second)
+}
+
+// RunSSHCommandWithAuthTimeout 通过 SSH 密码认证执行远程命令，带超时控制
+func RunSSHCommandWithAuthTimeout(hostname, username, password string, port int, command string, timeout time.Duration) (string, error) {
+	// 创建 SSH 配置
+	config := &ssh.ClientConfig{
+		User: username,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(password),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	// 连接地址
+	addr := fmt.Sprintf("%s:%d", hostname, port)
+
+	// 建立 SSH 连接
+	client, err := ssh.Dial("tcp", addr, config)
+	if err != nil {
+		return "", fmt.Errorf("SSH 连接失败：%v", err)
+	}
+	defer client.Close()
+
+	// 创建会话
+	session, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("SSH 会话创建失败：%v", err)
+	}
+	defer session.Close()
+
+	// 设置超时
+	done := make(chan struct {
+		output []byte
+		err    error
+	}, 1)
+
+	go func() {
+		output, err := session.CombinedOutput(command)
+		done <- struct {
+			output []byte
+			err    error
+		}{output, err}
+	}()
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			return "", fmt.Errorf("SSH 命令执行失败：%v", result.err)
+		}
+		return string(result.output), nil
+	case <-time.After(timeout):
+		client.Close()
+		return "", fmt.Errorf("SSH 命令执行超时（%v）", timeout)
+	}
 }

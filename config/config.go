@@ -37,6 +37,16 @@ const (
 	TestDiskInfo TestType = "I"
 )
 
+// SSHAuthInfo SSH 认证信息
+type SSHAuthInfo struct {
+	// Username SSH 用户名
+	Username string
+	// Password SSH 密码
+	Password string
+	// Port SSH 端口
+	Port int
+}
+
 // Config 配置结构体，包含所有运行参数
 type Config struct {
 	// Hosts 主机列表
@@ -75,6 +85,10 @@ type Config struct {
 	IOStatDevices []string
 	// NetQualityTarget 网络质量测试目标主机
 	NetQualityTarget string
+	// SSHAuthFile SSH 认证配置文件路径
+	SSHAuthFile string
+	// SSHAuthMap 主机认证信息映射（从 SSHAuthFile 解析）
+	SSHAuthMap map[string]SSHAuthInfo
 }
 
 // DefaultConfig 返回默认配置
