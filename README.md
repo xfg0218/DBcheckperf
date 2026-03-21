@@ -22,6 +22,7 @@ dbcheckperf is a database performance check tool written in Go, based on the Gre
 - **Multi-Architecture Support**: Compatible with x86/x86_64 (Intel/AMD) and ARM/ARM64 architecture servers
 - **Tabular Output**: Clearly displays test results and summary statistics for each host
 - **Quick Testing**: Single iteration testing for fast performance checks
+- **SSH Password Authentication**: Support testing remote hosts without SSH key-based authentication, using `-F` option to specify authentication file
 
 ## Installation
 
@@ -56,6 +57,9 @@ dbcheckperf -d <test_dir> [-d <test_dir> ...]
 dbcheckperf -d <temp_dir>
      {-f <hostfile> | -h <host> [-h <host> ...]}
      [-r n|N|M [--duration <time>]] [-D] [-v|-V] [--buffer-size <KB>]
+
+# SSH password authentication testing (no SSH key required)
+dbcheckperf -d <test_dir> -F <ssh_auth_file> [-r ds] [-B <block_size>] [-S <file_size>] [-D] [-v|-V]
 ```
 
 ### Command Line Options
@@ -66,6 +70,7 @@ dbcheckperf -d <temp_dir>
 | `-d <dir>` | Test directory (can be specified multiple times) | Required |
 | `-D` | Display detailed results per host | false |
 | `-f <hostfile>` | File containing host list | - |
+| `-F <ssh_auth_file>` | SSH authentication file (format: hostname username password [port]), when specified, `-f` is not needed | - |
 | `-h <host>` | Hostname (can be specified multiple times) | - |
 | `-r <test_type>` | Test type: d=disk, s=memory, n/N/M=network, H=hardware, l=latency/IOPS, i=IO stats, u=NUMA, k=kernel params, q=network quality, I=disk info | dsn |
 | `-S <file_size>` | Disk I/O test file size | 2xRAM |
@@ -250,6 +255,27 @@ This will display:
 - **RAID Information**: RAID card model, cache size, stripe size, RAID level, battery backup
 - **Network Information**: Device name, speed, MTU, queue size, bond status, bond mode, driver, MAC address
 
+### Example 21: SSH Password Authentication Testing (No SSH Key Required)
+
+```bash
+dbcheckperf -F ssh_auth.txt -d /data -r ds -v
+```
+
+Test remote hosts using SSH password authentication without configuring SSH key-based login.
+
+**ssh_auth.txt file content**:
+```
+192.168.1.100 gpadmin password123 22
+192.168.1.101 gpadmin password456 22
+server3 root secret123 2222
+```
+
+**Security Recommendation**:
+```bash
+# Set file permissions to 600
+chmod 600 ssh_auth.txt
+```
+
 ## Output Format
 
 ### System Information Table
@@ -406,7 +432,9 @@ Network Bandwidth      110.56 MB/s         110.56 MB/s         110.56 MB/s      
 
 ## Host File Format
 
-Each line in the host file contains a hostname, with optional format:
+### Traditional Host File (for `-f` option)
+
+Basic format, requires SSH key-based authentication:
 
 ```
 # Basic format
@@ -429,6 +457,25 @@ server1
 server2
 gpadmin@server3:2222
 192.168.1.100
+```
+
+### SSH Authentication File (for `-F` option)
+
+Supports SSH password authentication, no key-based login required:
+
+```
+# Format: hostname username password [port]
+# First column is hostname or IP address
+
+192.168.1.100 gpadmin password123 22
+192.168.1.101 gpadmin password456 22
+server3 root secret123 2222
+```
+
+**Security Recommendation**:
+```bash
+# Set file permissions to 600
+chmod 600 ssh_auth.txt
 ```
 
 ## Project Structure
@@ -463,8 +510,8 @@ dbcheckperf/
 ```
 
 **Module Description**:
-- **common**: Common utility functions (IP resolution, SSH command execution)
-- **disk**: Disk I/O testing (sequential/random read/write) + disk type/model/capacity/filesystem detection
+- **common**: Common utility functions (IP resolution, SSH command execution, supports key-based and password authentication)
+- **disk**: Disk I/O testing (sequential/random read/write) + disk type/model/capacity/filesystem detection (supports SSH password authentication)
 - **network**: Network performance testing (iperf3/netperf/curl/TCP stream) + network quality testing (latency/packet loss/retransmit)
 - **memory**: Memory bandwidth testing (STREAM benchmark)
 - **system**: System information collection (CPU, memory, disk, network, virtualization)
@@ -488,7 +535,11 @@ dbcheckperf/
 2. **File Size**: Disk test file size is recommended to be set to 2x system RAM to ensure disk I/O is tested rather than memory cache
 3. **Network Subnet**: All hosts in the host file should be on the same subnet during network testing
 4. **Parallel Mode**: Network parallel mode (`-r N`) recommends using an even number of hosts
-5. **SSH Trust**: Multi-host testing requires SSH passwordless login configuration
+5. **SSH Authentication**:
+   - **Key-based Login**: Traditional method requires SSH key-based authentication setup
+   - **Password Authentication**: Use `-F` option to specify SSH authentication file, no key setup required
+   - **Authentication File Format**: `hostname username password [port]`
+   - **Security Recommendation**: Set SSH authentication file permissions to 600 (`chmod 600 ssh_auth.txt`)
 
 ## Test Rigor Description
 

@@ -22,6 +22,7 @@ dbcheckperf 是一个用 Go 语言编写的数据库性能检查工具，基于 
 - **多架构支持**: 兼容 x86/x86_64 (Intel/AMD) 和 ARM/ARM64 架构服务器
 - **表格化输出**: 清晰展示每台主机的测试结果和汇总统计
 - **快速测试**: 单次迭代测试，快速完成性能检查
+- **SSH 密码认证**: 支持无 SSH 免密登录情况下测试远程主机，通过 `-F` 选项指定认证文件
 
 ## 安装
 
@@ -56,6 +57,9 @@ dbcheckperf -d <测试目录> [-d <测试目录> ...]
 dbcheckperf -d <临时目录>
      {-f <主机文件> | -h <主机名> [-h <主机名> ...]}
      [-r n|N|M [--duration <时间>]] [-D] [-v|-V] [--buffer-size <KB>]
+
+# 使用 SSH 密码认证测试（无需 SSH 免密）
+dbcheckperf -d <测试目录> -F <SSH 认证文件> [-r ds] [-B <块大小>] [-S <文件大小>] [-D] [-v|-V]
 ```
 
 ### 命令行选项
@@ -66,6 +70,7 @@ dbcheckperf -d <临时目录>
 | `-d <目录>` | 测试目录（可多次指定） | 必需 |
 | `-D` | 显示每台主机的详细结果 | false |
 | `-f <主机文件>` | 包含主机列表的文件 | - |
+| `-F <SSH 认证文件>` | SSH 认证配置文件（格式：hostname username password [port]），指定此选项时不需要 -f | - |
 | `-h <主机名>` | 主机名（可多次指定） | - |
 | `-r <测试类型>` | 测试类型：d=磁盘，s=内存流，n/N/M=网络，H=硬件，l=延迟/IOPS，i=IO 统计，u=NUMA，k=内核参数，q=网络质量，I=磁盘信息 | dsn |
 | `-S <文件大小>` | 磁盘 I/O 测试文件大小 | 2xRAM |
@@ -236,7 +241,28 @@ dbcheckperf -h localhost -d /data -r dslIuk -v
 
 在所有主机上运行磁盘 I/O、内存带宽和并行网络测试。
 
-### 示例 13: 收集所有主机的硬件清单
+### 示例 20: 使用 SSH 密码认证测试（无需 SSH 免密）
+
+```bash
+dbcheckperf -F ssh_auth.txt -d /data -r ds -v
+```
+
+使用 SSH 密码认证测试远程主机，无需配置 SSH 免密登录。
+
+**ssh_auth.txt 文件内容**：
+```
+192.168.1.100 gpadmin password123 22
+192.168.1.101 gpadmin password456 22
+server3 root secret123 2222
+```
+
+**安全建议**：
+```bash
+# 设置文件权限为 600
+chmod 600 ssh_auth.txt
+```
+
+### 示例 21: 收集所有主机的硬件清单
 
 ```bash
 dbcheckperf -f hosts.txt -r H -v
@@ -406,7 +432,9 @@ IP 地址                时间 (秒)        数据量          速度 (MB/s)
 
 ## 主机文件格式
 
-主机文件每行包含一个主机名，可选格式：
+### 传统主机文件（用于 `-f` 选项）
+
+基本格式，需要配合 SSH 免密登录使用：
 
 ```
 # 基本格式
@@ -429,6 +457,25 @@ server1
 server2
 gpadmin@server3:2222
 192.168.1.100
+```
+
+### SSH 认证文件（用于 `-F` 选项）
+
+支持 SSH 密码认证，无需配置免密登录：
+
+```
+# 格式：hostname username password [port]
+# 第一列为 hostname 或 IP 地址
+
+192.168.1.100 gpadmin password123 22
+192.168.1.101 gpadmin password456 22
+server3 root secret123 2222
+```
+
+**安全建议**：
+```bash
+# 设置文件权限为 600
+chmod 600 ssh_auth.txt
 ```
 
 ## 项目结构
@@ -463,8 +510,8 @@ dbcheckperf/
 ```
 
 **模块说明**:
-- **common**: 公共工具函数（IP 地址解析、SSH 命令执行）
-- **disk**: 磁盘 I/O 测试（顺序读写、随机读写）+ 磁盘类型/型号/容量/文件系统检测
+- **common**: 公共工具函数（IP 地址解析、SSH 命令执行，支持免密和密码认证）
+- **disk**: 磁盘 I/O 测试（顺序读写、随机读写）+ 磁盘类型/型号/容量/文件系统检测（支持 SSH 密码认证）
 - **network**: 网络性能测试（iperf3/netperf/curl/TCP 流）+ 网络质量检测（延迟/丢包/重传）
 - **memory**: 内存带宽测试（STREAM 基准测试）
 - **system**: 系统信息收集（CPU、内存、磁盘、网络、虚拟化）
@@ -472,6 +519,7 @@ dbcheckperf/
 - **iostat**: IO 统计监控（/proc/diskstats）
 - **numa**: NUMA 信息收集（节点数、内存分布、CPU 亲和性）
 - **kernel**: 内核参数收集（VM/IO/网络参数）
+- **utils**: 工具函数（字节转换、文件操作、SSH 认证文件解析）
 - **checker.go**: 主 API 入口，类型别名，向后兼容
 
 ## 性能阈值参考
@@ -488,7 +536,11 @@ dbcheckperf/
 2. **文件大小**: 磁盘测试文件大小建议设置为 2 倍系统 RAM，确保测试的是磁盘 I/O 而非内存缓存
 3. **网络子网**: 网络测试时，主机文件中的所有主机应在同一子网内
 4. **并行模式**: 网络并行模式 (`-r N`) 建议使用偶数台主机
-5. **SSH 信任**: 多主机测试需要配置 SSH 免密登录
+5. **SSH 认证**:
+   - **免密登录**: 传统方式需要配置 SSH 免密登录
+   - **密码认证**: 使用 `-F` 选项指定 SSH 认证文件，无需配置免密登录
+   - **认证文件格式**: `hostname username password [port]`
+   - **安全建议**: SSH 认证文件权限应设置为 600 (`chmod 600 ssh_auth.txt`)
 
 ## 测试严谨性说明
 
