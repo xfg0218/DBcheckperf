@@ -227,10 +227,88 @@ func NewHardwareChecker(verbose bool) *HardwareChecker {
 	}
 }
 
+// isVirtualMachine 检测是否为虚拟机
+func (hc *HardwareChecker) isVirtualMachine() bool {
+	// 方法 1: 检查 /sys/class/dmi/id/product_* 文件
+	// 虚拟机通常有特定的产品名称
+	productFile := "/sys/class/dmi/id/product_name"
+	if data, err := os.ReadFile(productFile); err == nil {
+		product := strings.ToLower(strings.TrimSpace(string(data)))
+		// 常见虚拟机产品名称
+		virtualProducts := []string{
+			"virtual machine", "virtualbox", "vmware", "qemu", "kvm",
+			"xen", "hyper-v", "parallels", "openstack", "cloud",
+			"alibaba cloud", "ecs", "aws", "azure", "google cloud",
+		}
+		for _, vp := range virtualProducts {
+			if strings.Contains(product, vp) {
+				return true
+			}
+		}
+	}
+
+	// 方法 2: 检查 /proc/cpuinfo 中的 CPU 型号
+	// 虚拟机 CPU 通常包含特定标识
+	cpuinfoFile := "/proc/cpuinfo"
+	if data, err := os.ReadFile(cpuinfoFile); err == nil {
+		cpuinfo := strings.ToLower(string(data))
+		// 虚拟机 CPU 特征
+		virtualCPUs := []string{"qemu", "kvm", "xen", "hypervisor"}
+		for _, vc := range virtualCPUs {
+			if strings.Contains(cpuinfo, vc) {
+				return true
+			}
+		}
+	}
+
+	// 方法 3: 检查是否运行在常见的虚拟化平台上
+	// 使用 systemd-detect-virt 命令（如果可用）
+	cmd := exec.Command("systemd-detect-virt")
+	output, err := cmd.Output()
+	if err == nil {
+		virtType := strings.ToLower(strings.TrimSpace(string(output)))
+		// none 表示物理机，其他都是虚拟机
+		if virtType != "none" && virtType != "" {
+			return true
+		}
+	}
+
+	// 方法 4: 检查 virtio 设备（KVM/QEMU 虚拟机）
+	virtioPath := "/sys/bus/virtio/drivers"
+	if _, err := os.Stat(virtioPath); err == nil {
+		return true
+	}
+
+	// 方法 5: 检查 pci 设备中的虚拟化设备
+	cmd = exec.Command("lspci")
+	output, err = cmd.Output()
+	if err == nil {
+		pciInfo := strings.ToLower(string(output))
+		if strings.Contains(pciInfo, "virtio") ||
+			strings.Contains(pciInfo, "vmware") ||
+			strings.Contains(pciInfo, "xen") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Run 执行硬件信息收集
 func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 	info := &HardwareInfo{
 		Host: common.GetHostname(),
+	}
+
+	// 检测是否为虚拟机
+	isVirtual := hc.isVirtualMachine()
+
+	if hc.Verbose {
+		if isVirtual {
+			fmt.Println("检测到虚拟机环境，使用简化的信息收集方式")
+		} else {
+			fmt.Println("检测到物理机环境")
+		}
 	}
 
 	// 收集 CPU 信息
@@ -242,8 +320,16 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 	// 收集磁盘信息
 	info.DiskInfos = hc.getDiskInfos()
 
-	// 收集 RAID 信息
-	info.RAIDInfo = hc.getRAIDInfo()
+	// 收集 RAID 信息（虚拟机通常没有 RAID）
+	if !isVirtual {
+		info.RAIDInfo = hc.getRAIDInfo()
+	} else {
+		info.RAIDInfo = &RAIDConfigInfo{
+			HasRAID:      false,
+			StripeSize:   64,
+			BatteryBackup: false,
+		}
+	}
 
 	// 收集网卡信息
 	info.NICInfos = hc.getNICInfos()
@@ -269,6 +355,7 @@ func (hc *HardwareChecker) getCPUInfo() *CPUInfo {
 	lines := strings.Split(string(data), "\n")
 	processorCount := 0
 	physicalIds := make(map[string]bool)
+	hasPhysicalID := false
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "model name") {
@@ -284,6 +371,7 @@ func (hc *HardwareChecker) getCPUInfo() *CPUInfo {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				physicalIds[strings.TrimSpace(parts[1])] = true
+				hasPhysicalID = true
 			}
 		}
 		if strings.HasPrefix(line, "cpu MHz") {
@@ -297,7 +385,15 @@ func (hc *HardwareChecker) getCPUInfo() *CPUInfo {
 
 	cpu.Cores = processorCount
 	if processorCount > 0 {
-		cpu.Sockets = len(physicalIds)
+		// 如果有 physical id 且有效，使用 physical id 计算插槽数
+		if hasPhysicalID && len(physicalIds) > 0 {
+			cpu.Sockets = len(physicalIds)
+		} else {
+			// 虚拟机环境：没有 physical id 或都为 0，根据核心数推断
+			// 通常虚拟机只有 1 个物理插槽
+			cpu.Sockets = 1
+		}
+		// 确保 sockets 至少为 1
 		if cpu.Sockets == 0 {
 			cpu.Sockets = 1
 		}
@@ -323,22 +419,44 @@ func (hc *HardwareChecker) getCPUInfo() *CPUInfo {
 // getMemoryInfo 获取内存信息
 func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 	mem := &MemoryInfo{
-		MemoryType:   "Unknown",
+		MemoryType:   "RAM",
 		MemorySpeed:  0,
 		MemorySlots:  0,
 		NUMANodes:    1,
 	}
 
-	// 获取总内存
+	// 获取总内存 - 优先使用 utils.GetTotalRAM()
 	total, err := utils.GetTotalRAM()
 	if err == nil {
 		mem.TotalMemory = total
 	}
 
+	// 备用方案：直接读取 /proc/meminfo
+	if mem.TotalMemory == 0 {
+		data, err := os.ReadFile("/proc/meminfo")
+		if err == nil {
+			lines := strings.Split(string(data), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "MemTotal:") {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						value := strings.TrimSpace(parts[1])
+						value = strings.TrimSuffix(value, " kB")
+						totalKB, _ := strconv.ParseUint(value, 10, 64)
+						if totalKB > 0 {
+							mem.TotalMemory = totalKB * 1024 // 转换为字节
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
 	// 获取 NUMA 节点数
 	mem.NUMANodes = hc.getNumANodes()
 
-	// 尝试使用 dmidecode 获取内存类型和速度
+	// 尝试使用 dmidecode 获取内存类型和速度（物理机有效）
 	cmd := exec.Command("dmidecode", "-t", "memory")
 	output, err := cmd.Output()
 	if err == nil {
@@ -349,7 +467,7 @@ func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
 					memType := strings.TrimSpace(parts[1])
-					if memType != "" && memType != "Unknown" {
+					if memType != "" && memType != "Unknown" && memType != "Not Specified" {
 						mem.MemoryType = memType
 					}
 				}
@@ -369,6 +487,15 @@ func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 		}
 	}
 
+	// 虚拟机环境：dmidecode 通常无效，设置默认值
+	if mem.MemoryType == "Unknown" || mem.MemoryType == "Not Specified" {
+		mem.MemoryType = "RAM"
+	}
+	if mem.MemorySlots == 0 && mem.TotalMemory > 0 {
+		// 虚拟机通常只有 1 个内存插槽
+		mem.MemorySlots = 1
+	}
+
 	return mem
 }
 
@@ -385,17 +512,95 @@ func (hc *HardwareChecker) getDiskInfos() []*DiskInfo {
 
 	for _, entry := range entries {
 		name := entry.Name()
-		// 跳过 loop 设备和分区
+		// 跳过 loop 设备和光驱
 		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "sr") {
 			continue
 		}
-		// 只处理 sd* 和 nvme* 设备
-		if !strings.HasPrefix(name, "sd") && !strings.HasPrefix(name, "nvme") && !strings.HasPrefix(name, "vd") {
+		// 扩大设备名称匹配范围：支持物理磁盘和虚拟磁盘
+		// sd*: SCSI/SATA 磁盘
+		// nvme*: NVMe SSD
+		// vd*: KVM/QEMU 虚拟磁盘 (virtio)
+		// xvd*: Xen 虚拟磁盘
+		// pmem*: Persistent Memory
+		// mmc*: eMMC 存储
+		if !strings.HasPrefix(name, "sd") &&
+			!strings.HasPrefix(name, "nvme") &&
+			!strings.HasPrefix(name, "vd") &&
+			!strings.HasPrefix(name, "xvd") &&
+			!strings.HasPrefix(name, "pmem") &&
+			!strings.HasPrefix(name, "mmc") {
 			continue
 		}
 
 		diskInfo := hc.getSingleDiskInfo(name)
 		if diskInfo != nil {
+			diskInfos = append(diskInfos, diskInfo)
+		}
+	}
+
+	// 备用方案：如果 /sys/block 没有检测到磁盘，使用 lsblk 命令
+	if len(diskInfos) == 0 {
+		diskInfos = hc.getDiskInfosFromLsblk()
+	}
+
+	return diskInfos
+}
+
+// getDiskInfosFromLsblk 使用 lsblk 命令获取磁盘信息（备用方案）
+func (hc *HardwareChecker) getDiskInfosFromLsblk() []*DiskInfo {
+	var diskInfos []*DiskInfo
+
+	cmd := exec.Command("lsblk", "-bdn", "-o", "NAME,SIZE,ROTA,TYPE,MODEL")
+	output, err := cmd.Output()
+	if err != nil {
+		return diskInfos
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+
+		name := fields[0]
+		// 跳过分区和光驱
+		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "sr") {
+			continue
+		}
+
+		diskInfo := &DiskInfo{
+			Name: name,
+		}
+
+		// 解析大小
+		if size, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
+			diskInfo.Size = size
+		}
+
+		// 解析是否旋转
+		diskInfo.Rotational = fields[2] == "1"
+		if fields[2] == "0" {
+			if strings.HasPrefix(name, "nvme") {
+				diskInfo.Type = "NVMe"
+			} else {
+				diskInfo.Type = "SSD"
+			}
+		} else {
+			diskInfo.Type = "HDD"
+		}
+
+		// 解析型号（可能包含空格）
+		if len(fields) >= 5 {
+			diskInfo.Model = strings.Join(fields[4:], " ")
+		}
+
+		if diskInfo.Name != "" {
 			diskInfos = append(diskInfos, diskInfo)
 		}
 	}
@@ -527,7 +732,7 @@ func (hc *HardwareChecker) getNICInfos() []*NICInfo {
 
 	for _, entry := range entries {
 		name := entry.Name()
-		// 跳过 lo 和虚拟接口
+		// 跳过 lo 回环接口和明显的虚拟接口
 		if name == "lo" || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") {
 			continue
 		}
@@ -536,6 +741,99 @@ func (hc *HardwareChecker) getNICInfos() []*NICInfo {
 		if nicInfo != nil {
 			nicInfos = append(nicInfos, nicInfo)
 		}
+	}
+
+	// 备用方案：如果 /sys/class/net 没有检测到网卡，使用 ip link 命令
+	if len(nicInfos) == 0 {
+		nicInfos = hc.getNICInfosFromIpLink()
+	}
+
+	return nicInfos
+}
+
+// getNICInfosFromIpLink 使用 ip link 命令获取网卡信息（备用方案）
+func (hc *HardwareChecker) getNICInfosFromIpLink() []*NICInfo {
+	var nicInfos []*NICInfo
+
+	cmd := exec.Command("ip", "-o", "link", "show")
+	output, err := cmd.Output()
+	if err != nil {
+		return nicInfos
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// 解析 ip link 输出格式：1: eth0: <BROADCAST,MULTICAST,UP> ...
+		parts := strings.SplitN(line, ": ", 3)
+		if len(parts) < 3 {
+			continue
+		}
+
+		name := parts[1]
+		// 跳过回环接口
+		if name == "lo" {
+			continue
+		}
+
+		nicInfo := &NICInfo{
+			Name: name,
+		}
+
+		// 获取 MTU（如果有的话）
+		if mtuIdx := strings.Index(line, "mtu "); mtuIdx != -1 {
+			mtuStr := line[mtuIdx+4:]
+			if spaceIdx := strings.Index(mtuStr, " "); spaceIdx != -1 {
+				mtuStr = mtuStr[:spaceIdx]
+			}
+			if mtu, err := strconv.Atoi(mtuStr); err == nil {
+				nicInfo.MTU = mtu
+			}
+		}
+
+		// 获取 MAC 地址（如果有的话）
+		if strings.Contains(line, "link/ether") {
+			etherParts := strings.Split(line, "link/ether ")
+			if len(etherParts) >= 2 {
+				macPart := etherParts[1]
+				if spaceIdx := strings.Index(macPart, " "); spaceIdx != -1 {
+					macPart = macPart[:spaceIdx]
+				}
+				nicInfo.MACAddress = macPart
+			}
+		}
+
+		// 尝试从 /sys/class/net 获取更多信息
+		if nicInfo.Speed == 0 {
+			speedPath := fmt.Sprintf("/sys/class/net/%s/speed", name)
+			if data, err := os.ReadFile(speedPath); err == nil {
+				if speed, _ := strconv.Atoi(strings.TrimSpace(string(data))); speed > 0 {
+					nicInfo.Speed = speed
+				}
+			}
+		}
+
+		if nicInfo.MTU == 0 {
+			mtuPath := fmt.Sprintf("/sys/class/net/%s/mtu", name)
+			if data, err := os.ReadFile(mtuPath); err == nil {
+				if mtu, _ := strconv.Atoi(strings.TrimSpace(string(data))); mtu > 0 {
+					nicInfo.MTU = mtu
+				}
+			}
+		}
+
+		if nicInfo.MACAddress == "" {
+			macPath := fmt.Sprintf("/sys/class/net/%s/address", name)
+			if data, err := os.ReadFile(macPath); err == nil {
+				nicInfo.MACAddress = strings.TrimSpace(string(data))
+			}
+		}
+
+		nicInfos = append(nicInfos, nicInfo)
 	}
 
 	return nicInfos

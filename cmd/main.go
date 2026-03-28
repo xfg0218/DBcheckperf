@@ -294,12 +294,12 @@ func main() {
 			} else {
 				// 转换为 NetworkResult
 				networkQuality := &checker.NetworkResult{
-					SourceHost:   common.GetHostname(),
-					DestHost:     target,
-					LatencyAvg:   getFloat64(quality, "latency_avg"),
-					LatencyMax:   getFloat64(quality, "latency_max"),
-					PacketLoss:   getFloat64(quality, "packet_loss"),
-					MTU:          getInt(quality, "mtu"),
+					SourceHost:    common.GetHostname(),
+					DestHost:      target,
+					LatencyAvg:    getFloat64(quality, "latency_avg"),
+					LatencyMax:    getFloat64(quality, "latency_max"),
+					PacketLoss:    getFloat64(quality, "packet_loss"),
+					MTU:           getInt(quality, "mtu"),
 					TCPRetransmit: getFloat64(quality, "tcp_retransmit"),
 				}
 				rep.PrintNetworkQuality([]*checker.NetworkResult{networkQuality})
@@ -723,7 +723,7 @@ func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
 		} else {
 			// 远程主机，使用 SSH 连接
 			var remoteInfo *checker.RemoteHardwareInfo
-			
+
 			// 如果配置了 SSH 认证文件，使用密码认证
 			if cfg.SSHAuthFile != "" && cfg.SSHAuthMap != nil {
 				if authInfo, ok := cfg.SSHAuthMap[host]; ok {
@@ -742,7 +742,7 @@ func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
 				// 使用传统 SSH 免密登录
 				remoteInfo = hardwareChecker.RunRemote(host)
 			}
-			
+
 			if remoteInfo.Error != nil {
 				rep.PrintVerbose("警告：主机 %s 硬件信息收集失败：%v\n", host, remoteInfo.Error)
 				continue
