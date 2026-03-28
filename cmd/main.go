@@ -7,11 +7,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"dbcheckperf/config"
 	"dbcheckperf/pkg/checker"
+	"dbcheckperf/pkg/checker/common"
+	"dbcheckperf/pkg/checker/disk"
+	"dbcheckperf/pkg/checker/network"
 	"dbcheckperf/pkg/reporter"
 	"dbcheckperf/pkg/utils"
 )
@@ -201,6 +205,133 @@ func main() {
 
 			rep.PrintStreamResults(streamResults, agg)
 		}
+	}
+
+	// 运行延迟和 IOPS 测试
+	var latencyResults []*checker.LatencyResult
+	if hasTestType(cfg.TestTypes, config.TestLatency) {
+		rep.PrintProgress("正在运行延迟和 IOPS 测试...")
+
+		latencyChecker := checker.NewLatencyChecker(cfg.LatencyBlockSize, cfg.LatencyBlockSize, cfg.Verbose, true)
+
+		for _, dir := range cfg.TestDirs {
+			result, err := latencyChecker.Run(dir)
+			if err != nil {
+				rep.PrintVerbose("警告：目录 %s 延迟测试失败：%v\n", dir, err)
+				continue
+			}
+			latencyResults = append(latencyResults, result)
+		}
+
+		if len(latencyResults) > 0 {
+			rep.PrintLatencyResults(latencyResults)
+		}
+	}
+
+	// 运行 IO 统计监控
+	if hasTestType(cfg.TestTypes, config.TestIOStat) {
+		rep.PrintProgress("正在运行 IO 统计监控...")
+
+		interval, err := time.ParseDuration(cfg.IOStatInterval)
+		if err != nil {
+			interval = time.Second
+		}
+
+		iostatChecker := checker.NewIOStatChecker(cfg.Verbose, interval, cfg.IOStatDevices)
+		stats, err := iostatChecker.Collect()
+		if err != nil {
+			rep.PrintError(fmt.Errorf("IO 统计收集失败：%v", err))
+		} else {
+			// 转换为指针切片
+			statPtrs := make([]*checker.IOStats, len(stats))
+			for i := range stats {
+				statPtrs[i] = &stats[i]
+			}
+			rep.PrintIOStatsResults(statPtrs)
+		}
+	}
+
+	// 运行 NUMA 信息收集
+	if hasTestType(cfg.TestTypes, config.TestNUMA) {
+		rep.PrintProgress("正在收集 NUMA 信息...")
+
+		numaChecker := checker.NewNUMAChecker(cfg.Verbose)
+		info, err := numaChecker.Collect()
+		if err != nil {
+			rep.PrintVerbose("警告：NUMA 信息收集失败：%v\n", err)
+		} else {
+			rep.PrintNUMAInfo(info)
+		}
+	}
+
+	// 运行内核参数收集
+	if hasTestType(cfg.TestTypes, config.TestKernel) {
+		rep.PrintProgress("正在收集内核参数...")
+
+		kernelChecker := checker.NewKernelChecker(cfg.Verbose, cfg.IOStatDevices)
+		params, err := kernelChecker.Collect()
+		if err != nil {
+			rep.PrintVerbose("警告：内核参数收集失败：%v\n", err)
+		} else {
+			rep.PrintKernelParams(params)
+		}
+	}
+
+	// 运行网络质量测试
+	if hasTestType(cfg.TestTypes, config.TestNetQuality) {
+		rep.PrintProgress("正在运行网络质量测试...")
+
+		target := cfg.NetQualityTarget
+		if target == "" && len(cfg.Hosts) > 0 {
+			target = cfg.Hosts[0]
+		}
+
+		if target != "" {
+			// 使用 NetworkResult 格式
+			quality, err := network.CollectNetworkQuality(target)
+			if err != nil {
+				rep.PrintVerbose("警告：网络质量测试失败：%v\n", err)
+			} else {
+				// 转换为 NetworkResult
+				networkQuality := &checker.NetworkResult{
+					SourceHost:   common.GetHostname(),
+					DestHost:     target,
+					LatencyAvg:   getFloat64(quality, "latency_avg"),
+					LatencyMax:   getFloat64(quality, "latency_max"),
+					PacketLoss:   getFloat64(quality, "packet_loss"),
+					MTU:          getInt(quality, "mtu"),
+					TCPRetransmit: getFloat64(quality, "tcp_retransmit"),
+				}
+				rep.PrintNetworkQuality([]*checker.NetworkResult{networkQuality})
+			}
+		} else {
+			rep.PrintVerbose("警告：未指定网络质量测试目标主机\n")
+		}
+	}
+
+	// 运行磁盘详细信息收集
+	if hasTestType(cfg.TestTypes, config.TestDiskInfo) {
+		rep.PrintProgress("正在收集磁盘详细信息...")
+
+		var diskInfoResults []*checker.DiskResult
+		for _, dir := range cfg.TestDirs {
+			_, diskType, diskModel, diskCapacity, blockSize, scheduler, fileSystem, mountOptions, freeSpace, inodeUsage := disk.CollectFullDiskInfo(dir)
+			result := &checker.DiskResult{
+				Host:         common.GetHostname(),
+				Dir:          dir,
+				DiskType:     diskType,
+				DiskModel:    diskModel,
+				DiskCapacity: diskCapacity,
+				BlockSize:    int64(blockSize),
+				Scheduler:    scheduler,
+				FileSystem:   fileSystem,
+				MountOptions: mountOptions,
+				FreeSpace:    freeSpace,
+				InodeUsage:   inodeUsage,
+			}
+			diskInfoResults = append(diskInfoResults, result)
+		}
+		rep.PrintDiskInfoResults(diskInfoResults)
 	}
 
 	// 运行网络测试
@@ -625,4 +756,36 @@ func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
 	} else {
 		rep.PrintError(fmt.Errorf("未能收集到任何主机的硬件信息"))
 	}
+}
+
+// getFloat64 从 map 中安全获取 float64 值
+func getFloat64(m map[string]interface{}, key string) float64 {
+	if v, ok := m[key]; ok {
+		switch val := v.(type) {
+		case float64:
+			return val
+		case int:
+			return float64(val)
+		case string:
+			f, _ := strconv.ParseFloat(val, 64)
+			return f
+		}
+	}
+	return 0
+}
+
+// getInt 从 map 中安全获取 int 值
+func getInt(m map[string]interface{}, key string) int {
+	if v, ok := m[key]; ok {
+		switch val := v.(type) {
+		case int:
+			return val
+		case float64:
+			return int(val)
+		case string:
+			i, _ := strconv.Atoi(val)
+			return i
+		}
+	}
+	return 0
 }
