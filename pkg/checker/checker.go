@@ -234,6 +234,9 @@ func (hc *HardwareChecker) isVirtualMachine() bool {
 	productFile := "/sys/class/dmi/id/product_name"
 	if data, err := os.ReadFile(productFile); err == nil {
 		product := strings.ToLower(strings.TrimSpace(string(data)))
+		if hc.Verbose {
+			fmt.Printf("DEBUG: 虚拟机检测 (product_name): %s\n", product)
+		}
 		// 常见虚拟机产品名称
 		virtualProducts := []string{
 			"virtual machine", "virtualbox", "vmware", "qemu", "kvm",
@@ -242,9 +245,14 @@ func (hc *HardwareChecker) isVirtualMachine() bool {
 		}
 		for _, vp := range virtualProducts {
 			if strings.Contains(product, vp) {
+				if hc.Verbose {
+					fmt.Printf("DEBUG: 虚拟机检测匹配：%s 包含 %s\n", product, vp)
+				}
 				return true
 			}
 		}
+	} else if hc.Verbose {
+		fmt.Printf("DEBUG: 无法读取 %s: %v\n", productFile, err)
 	}
 
 	// 方法 2: 检查 /proc/cpuinfo 中的 CPU 型号
@@ -256,6 +264,9 @@ func (hc *HardwareChecker) isVirtualMachine() bool {
 		virtualCPUs := []string{"qemu", "kvm", "xen", "hypervisor"}
 		for _, vc := range virtualCPUs {
 			if strings.Contains(cpuinfo, vc) {
+				if hc.Verbose {
+					fmt.Printf("DEBUG: 虚拟机检测匹配 (cpuinfo): 包含 %s\n", vc)
+				}
 				return true
 			}
 		}
@@ -267,15 +278,23 @@ func (hc *HardwareChecker) isVirtualMachine() bool {
 	output, err := cmd.Output()
 	if err == nil {
 		virtType := strings.ToLower(strings.TrimSpace(string(output)))
+		if hc.Verbose {
+			fmt.Printf("DEBUG: systemd-detect-virt 输出：%s\n", virtType)
+		}
 		// none 表示物理机，其他都是虚拟机
 		if virtType != "none" && virtType != "" {
 			return true
 		}
+	} else if hc.Verbose {
+		fmt.Printf("DEBUG: systemd-detect-virt 命令执行失败：%v\n", err)
 	}
 
 	// 方法 4: 检查 virtio 设备（KVM/QEMU 虚拟机）
 	virtioPath := "/sys/bus/virtio/drivers"
 	if _, err := os.Stat(virtioPath); err == nil {
+		if hc.Verbose {
+			fmt.Println("DEBUG: 检测到 virtio 设备，确认为虚拟机")
+		}
 		return true
 	}
 
@@ -287,10 +306,16 @@ func (hc *HardwareChecker) isVirtualMachine() bool {
 		if strings.Contains(pciInfo, "virtio") ||
 			strings.Contains(pciInfo, "vmware") ||
 			strings.Contains(pciInfo, "xen") {
+			if hc.Verbose {
+				fmt.Println("DEBUG: lspci 检测到虚拟化设备")
+			}
 			return true
 		}
 	}
 
+	if hc.Verbose {
+		fmt.Println("DEBUG: 未检测到虚拟机特征，判定为物理机")
+	}
 	return false
 }
 
@@ -429,10 +454,16 @@ func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 	total, err := utils.GetTotalRAM()
 	if err == nil {
 		mem.TotalMemory = total
+		if hc.Verbose && total > 0 {
+			fmt.Printf("DEBUG: 通过 utils.GetTotalRAM() 获取内存：%d bytes\n", total)
+		}
 	}
 
 	// 备用方案：直接读取 /proc/meminfo
 	if mem.TotalMemory == 0 {
+		if hc.Verbose {
+			fmt.Println("DEBUG: utils.GetTotalRAM() 失败，尝试读取 /proc/meminfo")
+		}
 		data, err := os.ReadFile("/proc/meminfo")
 		if err == nil {
 			lines := strings.Split(string(data), "\n")
@@ -445,6 +476,36 @@ func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 						totalKB, _ := strconv.ParseUint(value, 10, 64)
 						if totalKB > 0 {
 							mem.TotalMemory = totalKB * 1024 // 转换为字节
+							if hc.Verbose {
+								fmt.Printf("DEBUG: 通过 /proc/meminfo 获取内存：%d bytes\n", mem.TotalMemory)
+							}
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// 如果仍然为 0，尝试使用 free 命令
+	if mem.TotalMemory == 0 {
+		if hc.Verbose {
+			fmt.Println("DEBUG: /proc/meminfo 读取失败，尝试 free 命令")
+		}
+		cmd := exec.Command("free", "-b")
+		output, err := cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "Mem:") {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						total, _ := strconv.ParseUint(fields[1], 10, 64)
+						if total > 0 {
+							mem.TotalMemory = total
+							if hc.Verbose {
+								fmt.Printf("DEBUG: 通过 free -b 获取内存：%d bytes\n", total)
+							}
 						}
 					}
 					break
@@ -496,6 +557,11 @@ func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 		mem.MemorySlots = 1
 	}
 
+	if hc.Verbose {
+		fmt.Printf("DEBUG: 最终内存信息：Total=%d bytes, Type=%s, Slots=%d\n",
+			mem.TotalMemory, mem.MemoryType, mem.MemorySlots)
+	}
+
 	return mem
 }
 
@@ -503,11 +569,22 @@ func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 func (hc *HardwareChecker) getDiskInfos() []*DiskInfo {
 	var diskInfos []*DiskInfo
 
+	if hc.Verbose {
+		fmt.Println("DEBUG: 开始收集磁盘信息...")
+	}
+
 	// 获取块设备列表
 	blockDir := "/sys/block"
 	entries, err := os.ReadDir(blockDir)
 	if err != nil {
+		if hc.Verbose {
+			fmt.Printf("DEBUG: 读取 /sys/block 失败：%v\n", err)
+		}
 		return diskInfos
+	}
+
+	if hc.Verbose {
+		fmt.Printf("DEBUG: 在 /sys/block 中找到 %d 个设备\n", len(entries))
 	}
 
 	for _, entry := range entries {
@@ -529,18 +606,35 @@ func (hc *HardwareChecker) getDiskInfos() []*DiskInfo {
 			!strings.HasPrefix(name, "xvd") &&
 			!strings.HasPrefix(name, "pmem") &&
 			!strings.HasPrefix(name, "mmc") {
+			if hc.Verbose {
+				fmt.Printf("DEBUG: 跳过未知设备类型：%s\n", name)
+			}
 			continue
 		}
 
 		diskInfo := hc.getSingleDiskInfo(name)
 		if diskInfo != nil {
+			if hc.Verbose {
+				fmt.Printf("DEBUG: 检测到磁盘：%s (类型：%s, 大小：%d bytes)\n",
+					diskInfo.Name, diskInfo.Type, diskInfo.Size)
+			}
 			diskInfos = append(diskInfos, diskInfo)
 		}
 	}
 
 	// 备用方案：如果 /sys/block 没有检测到磁盘，使用 lsblk 命令
 	if len(diskInfos) == 0 {
+		if hc.Verbose {
+			fmt.Println("DEBUG: /sys/block 未检测到磁盘，尝试使用 lsblk 命令...")
+		}
 		diskInfos = hc.getDiskInfosFromLsblk()
+		if hc.Verbose {
+			if len(diskInfos) > 0 {
+				fmt.Printf("DEBUG: 通过 lsblk 检测到 %d 个磁盘\n", len(diskInfos))
+			} else {
+				fmt.Println("DEBUG: lsblk 也未检测到磁盘")
+			}
+		}
 	}
 
 	return diskInfos
@@ -550,10 +644,18 @@ func (hc *HardwareChecker) getDiskInfos() []*DiskInfo {
 func (hc *HardwareChecker) getDiskInfosFromLsblk() []*DiskInfo {
 	var diskInfos []*DiskInfo
 
+	// CentOS 7.x 兼容性：使用更通用的参数格式
+	// 先尝试标准格式，失败后尝试旧格式
 	cmd := exec.Command("lsblk", "-bdn", "-o", "NAME,SIZE,ROTA,TYPE,MODEL")
 	output, err := cmd.Output()
+	
+	// 如果失败，尝试 CentOS 7 的旧格式（无 -o 参数）
 	if err != nil {
-		return diskInfos
+		cmd = exec.Command("lsblk", "-bdn")
+		output, err = cmd.Output()
+		if err != nil {
+			return diskInfos
+		}
 	}
 
 	lines := strings.Split(string(output), "\n")
@@ -564,7 +666,7 @@ func (hc *HardwareChecker) getDiskInfosFromLsblk() []*DiskInfo {
 		}
 
 		fields := strings.Fields(line)
-		if len(fields) < 4 {
+		if len(fields) < 2 {
 			continue
 		}
 
@@ -578,24 +680,28 @@ func (hc *HardwareChecker) getDiskInfosFromLsblk() []*DiskInfo {
 			Name: name,
 		}
 
-		// 解析大小
-		if size, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
-			diskInfo.Size = size
-		}
-
-		// 解析是否旋转
-		diskInfo.Rotational = fields[2] == "1"
-		if fields[2] == "0" {
-			if strings.HasPrefix(name, "nvme") {
-				diskInfo.Type = "NVMe"
-			} else {
-				diskInfo.Type = "SSD"
+		// 解析大小（第二个字段）
+		if len(fields) >= 2 {
+			if size, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
+				diskInfo.Size = size
 			}
-		} else {
-			diskInfo.Type = "HDD"
 		}
 
-		// 解析型号（可能包含空格）
+		// 解析是否旋转（第三个字段）
+		if len(fields) >= 3 {
+			diskInfo.Rotational = fields[2] == "1"
+			if fields[2] == "0" {
+				if strings.HasPrefix(name, "nvme") {
+					diskInfo.Type = "NVMe"
+				} else {
+					diskInfo.Type = "SSD"
+				}
+			} else {
+				diskInfo.Type = "HDD"
+			}
+		}
+
+		// 解析型号（第五个字段及之后）
 		if len(fields) >= 5 {
 			diskInfo.Model = strings.Join(fields[4:], " ")
 		}
@@ -724,10 +830,21 @@ func (hc *HardwareChecker) getRAIDInfo() *RAIDConfigInfo {
 func (hc *HardwareChecker) getNICInfos() []*NICInfo {
 	var nicInfos []*NICInfo
 
+	if hc.Verbose {
+		fmt.Println("DEBUG: 开始收集网卡信息...")
+	}
+
 	netPath := "/sys/class/net"
 	entries, err := os.ReadDir(netPath)
 	if err != nil {
+		if hc.Verbose {
+			fmt.Printf("DEBUG: 读取 /sys/class/net 失败：%v\n", err)
+		}
 		return nicInfos
+	}
+
+	if hc.Verbose {
+		fmt.Printf("DEBUG: 在 /sys/class/net 中找到 %d 个设备\n", len(entries))
 	}
 
 	for _, entry := range entries {
@@ -739,13 +856,27 @@ func (hc *HardwareChecker) getNICInfos() []*NICInfo {
 
 		nicInfo := hc.getSingleNICInfo(name)
 		if nicInfo != nil {
+			if hc.Verbose {
+				fmt.Printf("DEBUG: 检测到网卡：%s (MTU: %d, MAC: %s)\n",
+					nicInfo.Name, nicInfo.MTU, nicInfo.MACAddress)
+			}
 			nicInfos = append(nicInfos, nicInfo)
 		}
 	}
 
 	// 备用方案：如果 /sys/class/net 没有检测到网卡，使用 ip link 命令
 	if len(nicInfos) == 0 {
+		if hc.Verbose {
+			fmt.Println("DEBUG: /sys/class/net 未检测到网卡，尝试使用 ip link 命令...")
+		}
 		nicInfos = hc.getNICInfosFromIpLink()
+		if hc.Verbose {
+			if len(nicInfos) > 0 {
+				fmt.Printf("DEBUG: 通过 ip link 检测到 %d 个网卡\n", len(nicInfos))
+			} else {
+				fmt.Println("DEBUG: ip link 也未检测到网卡")
+			}
+		}
 	}
 
 	return nicInfos
