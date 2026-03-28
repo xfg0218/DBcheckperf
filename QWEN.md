@@ -383,6 +383,7 @@ go build -o dbcheckperf ./cmd/main.go
 - 代码修复后在自动提交到 GitHub 仓库
 - 在提交时自动过滤临时文件，测试文件，PLAN 文件等
 - 代码仅提交到github即可，不需要进行发版
+- 手动在进行发版时，使用github上联系的版本号发版
 
 ## 文件更新
 
