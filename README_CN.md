@@ -251,8 +251,8 @@ dbcheckperf -F ssh_auth.txt -d /data -r ds -v
 
 **ssh_auth.txt 文件内容**：
 ```
-192.168.1.100 gpadmin password123 22
-192.168.1.101 gpadmin password456 22
+192.168.1.100 username password123 22
+192.168.1.101 username password456 22
 server3 root secret123 2222
 ```
 
@@ -455,7 +455,7 @@ username@hostname:port
 ```
 server1
 server2
-gpadmin@server3:2222
+username@server3:2222
 192.168.1.100
 ```
 
@@ -467,8 +467,8 @@ gpadmin@server3:2222
 # 格式：hostname username password [port]
 # 第一列为 hostname 或 IP 地址
 
-192.168.1.100 gpadmin password123 22
-192.168.1.101 gpadmin password456 22
+192.168.1.100 username password123 22
+192.168.1.101 username password456 22
 server3 root secret123 2222
 ```
 

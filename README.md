@@ -265,8 +265,8 @@ Test remote hosts using SSH password authentication without configuring SSH key-
 
 **ssh_auth.txt file content**:
 ```
-192.168.1.100 gpadmin password123 22
-192.168.1.101 gpadmin password456 22
+192.168.1.100 username password123 22
+192.168.1.101 username password456 22
 server3 root secret123 2222
 ```
 
@@ -455,7 +455,7 @@ Example `hosts.txt`:
 ```
 server1
 server2
-gpadmin@server3:2222
+username@server3:2222
 192.168.1.100
 ```
 
@@ -467,8 +467,8 @@ Supports SSH password authentication, no key-based login required:
 # Format: hostname username password [port]
 # First column is hostname or IP address
 
-192.168.1.100 gpadmin password123 22
-192.168.1.101 gpadmin password456 22
+192.168.1.100 username password123 22
+192.168.1.101 username password456 22
 server3 root secret123 2222
 ```
 
