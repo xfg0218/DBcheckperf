@@ -652,18 +652,27 @@ func (r *Reporter) PrintHardwareResults(infos []*checker.RemoteHardwareInfo) {
 		// CPU 信息（竖行展示）
 		fmt.Println("--- CPU 信息 ---")
 		fmt.Println()
-		cpuModel := info.CPUInfo.Model
+		cpuModel := "-"
+		cpuCores := 0
+		cpuSockets := 0
 		baseFreqStr := "-"
-		if info.CPUInfo.BaseFreq > 0 {
-			baseFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.BaseFreq)
-		}
 		turboFreqStr := "-"
-		if info.CPUInfo.TurboFreq > 0 {
-			turboFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.TurboFreq)
+
+		if info.CPUInfo != nil {
+			cpuModel = info.CPUInfo.Model
+			cpuCores = info.CPUInfo.Cores
+			cpuSockets = info.CPUInfo.Sockets
+			if info.CPUInfo.BaseFreq > 0 {
+				baseFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.BaseFreq)
+			}
+			if info.CPUInfo.TurboFreq > 0 {
+				turboFreqStr = fmt.Sprintf("%d MHz", info.CPUInfo.TurboFreq)
+			}
 		}
+
 		fmt.Printf("  CPU 型号：    %s\n", cpuModel)
-		fmt.Printf("  CPU 核心数：   %d\n", info.CPUInfo.Cores)
-		fmt.Printf("  CPU 插槽数：   %d\n", info.CPUInfo.Sockets)
+		fmt.Printf("  CPU 核心数：   %d\n", cpuCores)
+		fmt.Printf("  CPU 插槽数：   %d\n", cpuSockets)
 		fmt.Printf("  基准频率：   %s\n", baseFreqStr)
 		fmt.Printf("  睿频：       %s\n", turboFreqStr)
 		fmt.Println()
@@ -671,18 +680,27 @@ func (r *Reporter) PrintHardwareResults(infos []*checker.RemoteHardwareInfo) {
 		// 内存信息（竖行展示）
 		fmt.Println("--- 内存信息 ---")
 		fmt.Println()
-		memType := info.MemoryInfo.MemoryType
-		if memType == "" || memType == "Unknown" {
-			memType = "-"
-		}
+		memType := "-"
 		memSpeedStr := "-"
-		if info.MemoryInfo.MemorySpeed > 0 {
-			memSpeedStr = fmt.Sprintf("%d MHz", info.MemoryInfo.MemorySpeed)
+		memTotal := uint64(0)
+		memSlots := 0
+
+		if info.MemoryInfo != nil {
+			memType = info.MemoryInfo.MemoryType
+			if memType == "" || memType == "Unknown" {
+				memType = "-"
+			}
+			if info.MemoryInfo.MemorySpeed > 0 {
+				memSpeedStr = fmt.Sprintf("%d MHz", info.MemoryInfo.MemorySpeed)
+			}
+			memTotal = info.MemoryInfo.TotalMemory
+			memSlots = info.MemoryInfo.MemorySlots
 		}
-		fmt.Printf("  总内存：     %s\n", utils.FormatBytes(info.MemoryInfo.TotalMemory))
+
+		fmt.Printf("  总内存：     %s\n", utils.FormatBytes(memTotal))
 		fmt.Printf("  内存类型：   %s\n", memType)
 		fmt.Printf("  内存速度：   %s\n", memSpeedStr)
-		fmt.Printf("  插槽数：     %d\n", info.MemoryInfo.MemorySlots)
+		fmt.Printf("  插槽数：     %d\n", memSlots)
 		fmt.Println()
 
 		// 磁盘信息（竖行展示）
@@ -719,25 +737,28 @@ func (r *Reporter) PrintHardwareResults(infos []*checker.RemoteHardwareInfo) {
 		raidStatus := "未检测到"
 		raidModel := "-"
 		raidCache := "-"
-		raidStripe := fmt.Sprintf("%d KB", info.RAIDInfo.StripeSize)
+		raidStripe := "64 KB"
 		raidLevel := "-"
 		batteryBackup := "-"
 
-		if info.RAIDInfo.HasRAID {
-			raidStatus = "已检测"
-			if info.RAIDInfo.RAIDModel != "" {
-				raidModel = info.RAIDInfo.RAIDModel
-			}
-			if info.RAIDInfo.CacheSize > 0 {
-				raidCache = utils.FormatBytes(info.RAIDInfo.CacheSize)
-			}
-			if info.RAIDInfo.RAIDLevel != "" {
-				raidLevel = info.RAIDInfo.RAIDLevel
-			}
-			if info.RAIDInfo.BatteryBackup {
-				batteryBackup = "支持"
-			} else {
-				batteryBackup = "不支持"
+		if info.RAIDInfo != nil {
+			raidStripe = fmt.Sprintf("%d KB", info.RAIDInfo.StripeSize)
+			if info.RAIDInfo.HasRAID {
+				raidStatus = "已检测"
+				if info.RAIDInfo.RAIDModel != "" {
+					raidModel = info.RAIDInfo.RAIDModel
+				}
+				if info.RAIDInfo.CacheSize > 0 {
+					raidCache = utils.FormatBytes(info.RAIDInfo.CacheSize)
+				}
+				if info.RAIDInfo.RAIDLevel != "" {
+					raidLevel = info.RAIDInfo.RAIDLevel
+				}
+				if info.RAIDInfo.BatteryBackup {
+					batteryBackup = "支持"
+				} else {
+					batteryBackup = "不支持"
+				}
 			}
 		}
 
