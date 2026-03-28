@@ -649,8 +649,8 @@ func printUsage() {
   dbcheckperf -F ssh_auth.txt -d /data -r ds
 
   # ssh_auth.txt 文件格式示例：
-  # 192.168.1.100 gpadmin password123 22
-  # 192.168.1.101 gpadmin password456 22
+  # 192.168.1.100 username password123 22
+  # 192.168.1.101 username password456 22
   # server3 root secret123 2222
 
   # 测试磁盘延迟和 IOPS

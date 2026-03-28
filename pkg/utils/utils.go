@@ -37,7 +37,6 @@ func FormatBytes(bytes uint64) string {
 }
 
 // ParseFileSize 解析文件大小字符串（支持 KB、MB、GB 后缀）
-// 例如："5GB" -> 5368709120, "512MB" -> 536870912
 func ParseFileSize(sizeStr string) (uint64, error) {
 	sizeStr = strings.ToUpper(strings.TrimSpace(sizeStr))
 
@@ -146,7 +145,6 @@ func NormalizeDirPath(dir string) string {
 }
 
 // ReadHostFile 从主机文件读取主机列表
-// 文件格式：每行一个主机名，可选格式 [username@]<hostname>[:ssh_port]
 func ReadHostFile(filename string) ([]string, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -279,10 +277,6 @@ type SSHAuthInfo struct {
 }
 
 // ReadSSHAuthFile 从 SSH 认证文件读取主机认证信息
-// 文件格式：每行 hostname username password [port]
-// 示例：
-// 192.168.1.100 gpadmin password123 22
-// server3 root secret123 2222
 func ReadSSHAuthFile(filename string) (map[string]SSHAuthInfo, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
