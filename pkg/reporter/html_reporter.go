@@ -399,7 +399,7 @@ func (hr *HTMLReporter) generateHardwareInfoSection(hardwareInfos []*checker.Har
 			sb.WriteString(`<tbody>`)
 			for _, nic := range hw.NICInfos {
 				sb.WriteString(`<tr>`)
-				sb.WriteString(fmt.Sprintf(`<td>%s</td><td>%s</td><td>%d</td><td>%v</td><td>%s</td>`,
+				sb.WriteString(fmt.Sprintf(`<td>%s</td><td>%d Mbps</td><td>%d</td><td>%v</td><td>%s</td>`,
 					nic.Name, nic.Speed, nic.MTU, nic.IsBond, nic.Driver))
 				sb.WriteString(`</tr>`)
 			}
