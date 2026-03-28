@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -657,26 +658,39 @@ func (hc *HardwareChecker) RunRemoteWithAuth(host, username, password string, po
 		Host: host,
 	}
 
-	// 收集硬件信息的脚本
+	// 收集硬件信息的脚本 - 使用结构化输出
 	hardwareScript := `
-echo "===CPU_INFO==="
-cat /proc/cpuinfo 2>/dev/null | grep -E "model name|processor|physical id|cpu MHz" | head -50
+echo "===CPU_INFO_START==="
+cat /proc/cpuinfo 2>/dev/null
+echo "===CPU_INFO_END==="
 
-echo "===MEMORY_INFO==="
-free -b 2>/dev/null
-dmidecode -t memory 2>/dev/null | grep -E "Type:|Speed:|Locator:" | head -20
+echo "===MEMORY_INFO_START==="
+free -b 2>/dev/null | grep "^Mem:"
+cat /proc/meminfo 2>/dev/null | grep -E "^MemTotal:|^MemFree:|^MemAvailable:"
+echo "===MEMORY_INFO_END==="
 
-echo "===DISK_INFO==="
-lsblk -bd -o NAME,SIZE,ROTA,TYPE,MODEL 2>/dev/null || ls -la /sys/block/ 2>/dev/null
+echo "===DISK_INFO_START==="
+lsblk -bd -o NAME,SIZE,ROTA,TYPE,MODEL 2>/dev/null | grep -v "^NAME"
+echo "===DISK_INFO_END==="
 
-echo "===RAID_INFO==="
-cat /proc/mdstat 2>/dev/null
-lspci | grep -iE "raid|sas|storage" 2>/dev/null
+echo "===RAID_INFO_START==="
+cat /proc/mdstat 2>/dev/null | head -20
+lspci 2>/dev/null | grep -iE "raid|sas|storage"
+echo "===RAID_INFO_END==="
 
-echo "===NIC_INFO==="
-ip -o link show 2>/dev/null
-for dev in /sys/class/net/*/speed; do echo "$dev: $(cat $dev 2>/dev/null)"; done 2>/dev/null
-for dev in /sys/class/net/*/mtu; do echo "$dev: $(cat $dev 2>/dev/null)"; done 2>/dev/null
+echo "===NIC_INFO_START==="
+ip -o link show 2>/dev/null | grep -v "lo:"
+for dev in /sys/class/net/*; do
+    name=$(basename $dev)
+    if [ "$name" != "lo" ]; then
+        speed=$(cat $dev/speed 2>/dev/null || echo "unknown")
+        mtu=$(cat $dev/mtu 2>/dev/null || echo "1500")
+        mac=$(cat $dev/address 2>/dev/null || echo "unknown")
+        type=$(cat $dev/type 2>/dev/null || echo "unknown")
+        echo "$name: speed=$speed,mtu=$mtu,mac=$mac,type=$type"
+    fi
+done 2>/dev/null
+echo "===NIC_INFO_END==="
 `
 
 	// 使用 SSH 密码认证执行命令
@@ -688,7 +702,7 @@ for dev in /sys/class/net/*/mtu; do echo "$dev: $(cat $dev 2>/dev/null)"; done 2
 
 	// 解析输出
 	remoteInfo.HardwareInfo = hc.parseRemoteHardwareOutput(string(output))
-	
+
 	return remoteInfo
 }
 
@@ -701,61 +715,246 @@ func (hc *HardwareChecker) parseRemoteHardwareOutput(output string) *HardwareInf
 
 	lines := strings.Split(output, "\n")
 	section := ""
-	
+	physicalIds := make(map[string]bool)
+
 	for _, line := range lines {
-		if strings.Contains(line, "===CPU_INFO===") {
-			section = "cpu"
-			continue
-		}
-		if strings.Contains(line, "===MEMORY_INFO===") {
-			section = "memory"
-			continue
-		}
-		if strings.Contains(line, "===DISK_INFO===") {
-			section = "disk"
-			continue
-		}
-		if strings.Contains(line, "===RAID_INFO===") {
-			section = "raid"
-			continue
-		}
-		if strings.Contains(line, "===NIC_INFO===") {
-			section = "nic"
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 
+		// 检测段落开始
+		if strings.Contains(line, "===CPU_INFO_START===") {
+			section = "cpu"
+			continue
+		}
+		if strings.Contains(line, "===MEMORY_INFO_START===") {
+			section = "memory"
+			continue
+		}
+		if strings.Contains(line, "===DISK_INFO_START===") {
+			section = "disk"
+			continue
+		}
+		if strings.Contains(line, "===RAID_INFO_START===") {
+			section = "raid"
+			continue
+		}
+		if strings.Contains(line, "===NIC_INFO_START===") {
+			section = "nic"
+			continue
+		}
+		// 检测段落结束
+		if strings.Contains(line, "===CPU_INFO_END===") ||
+			strings.Contains(line, "===MEMORY_INFO_END===") ||
+			strings.Contains(line, "===DISK_INFO_END===") ||
+			strings.Contains(line, "===RAID_INFO_END===") ||
+			strings.Contains(line, "===NIC_INFO_END===") {
+			section = ""
+			continue
+		}
+
+		// 解析各段落内容
 		switch section {
 		case "cpu":
 			if strings.HasPrefix(line, "model name") {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
-					info.CPUInfo.Model = strings.TrimSpace(parts[1])
+					model := strings.TrimSpace(parts[1])
+					if model != "" {
+						info.CPUInfo.Model = model
+					}
 				}
 			}
 			if strings.HasPrefix(line, "processor") {
 				info.CPUInfo.Cores++
 			}
+			if strings.HasPrefix(line, "physical id") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					physicalIds[strings.TrimSpace(parts[1])] = true
+				}
+			}
 			if strings.HasPrefix(line, "cpu MHz") {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
 					mhz, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-					info.CPUInfo.BaseFreq = int(mhz)
+					if mhz > 0 {
+						info.CPUInfo.BaseFreq = int(mhz)
+					}
 				}
 			}
+
 		case "memory":
-			if strings.Contains(line, "Type:") {
+			// 解析 free -b 输出：Mem: 总内存 已用 空闲 共享 buff/cache 可用
+			if strings.HasPrefix(line, "Mem:") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					total, _ := strconv.ParseUint(fields[1], 10, 64)
+					if total > 0 {
+						info.MemoryInfo.TotalMemory = total
+					}
+				}
+			}
+			// 解析 /proc/meminfo 输出
+			if strings.HasPrefix(line, "MemTotal:") {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
-					info.MemoryInfo.MemoryType = strings.TrimSpace(parts[1])
+					value := strings.TrimSpace(parts[1])
+					value = strings.TrimSuffix(value, " kB")
+					total, _ := strconv.ParseUint(value, 10, 64)
+					if total > 0 && info.MemoryInfo.TotalMemory == 0 {
+						info.MemoryInfo.TotalMemory = total * 1024 // 转换为字节
+					}
+				}
+			}
+
+		case "disk":
+			// 解析 lsblk 输出：NAME SIZE ROTA TYPE MODEL
+			fields := strings.Fields(line)
+			if len(fields) >= 4 {
+				disk := &DiskInfo{
+					Name: fields[0],
+				}
+				// 解析大小
+				if len(fields) >= 2 {
+					disk.Size = parseSize(fields[1])
+				}
+				// 解析是否旋转
+				if len(fields) >= 3 {
+					disk.Rotational = fields[2] == "1"
+					if fields[2] == "0" {
+						if strings.HasPrefix(fields[0], "nvme") {
+							disk.Type = "NVMe"
+						} else {
+							disk.Type = "SSD"
+						}
+					} else {
+						disk.Type = "HDD"
+					}
+				}
+				// 解析型号
+				if len(fields) >= 5 {
+					disk.Model = strings.Join(fields[4:], " ")
+				}
+				if disk.Name != "" {
+					info.DiskInfos = append(info.DiskInfos, disk)
+				}
+			}
+
+		case "raid":
+			// 检测软件 RAID
+			if strings.Contains(line, "active") {
+				info.RAIDInfo = &RAIDConfigInfo{
+					HasRAID:    true,
+					RAIDModel:  "Linux Software RAID (mdraid)",
+					StripeSize: 512,
+				}
+			}
+			// 检测硬件 RAID 卡
+			if strings.Contains(strings.ToLower(line), "raid") ||
+				strings.Contains(strings.ToLower(line), "sas") ||
+				strings.Contains(strings.ToLower(line), "storage") {
+				if info.RAIDInfo == nil {
+					info.RAIDInfo = &RAIDConfigInfo{
+						HasRAID:    true,
+						RAIDModel:  line,
+						StripeSize: 64,
+					}
+				}
+			}
+
+		case "nic":
+			// 解析格式：eth0: speed=1000,mtu=1500,mac=xx:xx:xx:xx:xx:xx,type=1
+			if strings.Contains(line, "speed=") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					name := strings.TrimSpace(parts[0])
+					values := parts[1]
+
+					nic := &NICInfo{
+						Name: name,
+					}
+
+					// 解析各个字段
+					for _, kv := range strings.Split(values, ",") {
+						kv = strings.TrimSpace(kv)
+						if strings.HasPrefix(kv, "speed=") {
+							speed := strings.TrimPrefix(kv, "speed=")
+							if speed != "unknown" {
+								nic.Speed, _ = strconv.Atoi(speed)
+							}
+						}
+						if strings.HasPrefix(kv, "mtu=") {
+							mtu := strings.TrimPrefix(kv, "mtu=")
+							nic.MTU, _ = strconv.Atoi(mtu)
+						}
+						if strings.HasPrefix(kv, "mac=") {
+							nic.MACAddress = strings.TrimPrefix(kv, "mac=")
+						}
+					}
+
+					if nic.Name != "" {
+						info.NICInfos = append(info.NICInfos, nic)
+					}
 				}
 			}
 		}
 	}
 
+	// 计算 CPU 插槽数
+	if len(physicalIds) > 0 {
+		info.CPUInfo.Sockets = len(physicalIds)
+	} else if info.CPUInfo.Cores > 0 {
+		info.CPUInfo.Sockets = 1
+	}
+
+	// 获取 NUMA 节点数（本地）
 	info.CPUInfo.NUMANodes = hc.getNumANodes()
 	info.MemoryInfo.NUMANodes = info.CPUInfo.NUMANodes
 
+	// 如果没有检测到 RAID，设置默认值
+	if info.RAIDInfo == nil {
+		info.RAIDInfo = &RAIDConfigInfo{
+			HasRAID:    false,
+			StripeSize: 64,
+		}
+	}
+
 	return info
+}
+
+// parseSize 解析 lsblk 大小字符串（如 500G, 1T, 512M）
+func parseSize(sizeStr string) uint64 {
+	if sizeStr == "" {
+		return 0
+	}
+
+	// 提取数字和单位
+	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)([KMGTPEZ]?)$`)
+	matches := re.FindStringSubmatch(sizeStr)
+	if len(matches) < 3 {
+		// 尝试直接解析为数字
+		num, _ := strconv.ParseUint(sizeStr, 10, 64)
+		return num
+	}
+
+	num, _ := strconv.ParseFloat(matches[1], 64)
+	unit := matches[2]
+
+	multiplier := uint64(1)
+	switch unit {
+	case "K":
+		multiplier = 1024
+	case "M":
+		multiplier = 1024 * 1024
+	case "G":
+		multiplier = 1024 * 1024 * 1024
+	case "T":
+		multiplier = 1024 * 1024 * 1024 * 1024
+	}
+
+	return uint64(num * float64(multiplier))
 }
 
 // ==================== 聚合函数 ====================
