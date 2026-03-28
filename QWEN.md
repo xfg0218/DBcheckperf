@@ -225,8 +225,8 @@ dbcheckperf/
 - **SSH 认证文件格式**:
   ```
   # 格式：hostname username password [port]
-  192.168.1.100 gpadmin password123 22
-  192.168.1.101 gpadmin password456 22
+  192.168.1.100 username password123 22
+  192.168.1.101 username password456 22
   server3 root secret123 2222
   ```
 - **使用示例**:
@@ -387,9 +387,47 @@ go build -o dbcheckperf ./cmd/main.go
 
 ## 文件更新
 
-- 每次代码修改后把相关功能更新 README.md 和 README_CN.md 和 QWEN.md
+## 版本历史
 
-## 模块化架构（2026-03-20 起）
+| 版本 | 日期 | 类型 | 主要内容 |
+|------|------|------|----------|
+| v1.4.2 | 2026-03-28 | 文档更新 | 改进示例用户名（gpadmin → username） |
+| v1.4.1 | 2026-03-28 | Bug 修复 | 修复 AMD 平台磁盘顺序读写测试结果为 0 的问题 |
+| v1.4.0 | 2026-03-27 | 功能版 | CentOS 7.9 虚拟机支持、详细调试输出 |
+| v1.3.1 | 2026-03-26 | Bug 修复 | 修复网络测试中的问题 |
+| v1.3.0 | 2026-03-25 | 功能版 | 模块化重构、新增延迟/IOPS/IO 统计/NUMA/内核参数模块 |
+
+### v1.4.2 详细说明 (2026-03-28)
+
+**文档改进**:
+- 将 README 中的示例用户名从 `gpadmin` 改为 `username`
+- 避免用户直接复制示例导致混淆
+- 修改位置：README.md、README_CN.md 中的 ssh_auth.txt 和 hosts.txt 示例
+
+### v1.4.1 详细说明 (2026-03-28)
+
+**问题**: AMD 平台磁盘顺序读写测试结果为 0.00 MB/s
+
+**原因**: dd 命令输出格式多样性导致解析失败
+
+**修复内容**:
+- 增强 `parseDDOutput()` 函数 - 支持 6 种 dd 输出格式（bytes、中文、GB/MB、GiB/MiB、括号格式、copied 关键字）
+- 改进 `runWriteTest()` 函数 - 添加文件大小备用方案，改进错误验证逻辑
+- 改进 `runReadTest()` 函数 - 添加 DEBUG 调试输出
+- 更新版本号为 1.4.1
+
+**测试验证**:
+```bash
+# 编译
+go build -o dbcheckperf ./cmd/main.go
+
+# 测试
+./dbcheckperf -h localhost -d /tmp -r ds -v
+```
+
+## 文件更新
+
+- 每次代码修改后把相关功能更新 README.md 和 README_CN.md 和 QWEN.md
 
 ### 导入示例
 
