@@ -666,13 +666,39 @@ func (dc *DiskChecker) runWriteTest(testFile string, blockSize int, count int) (
 
 	// 验证写入的数据量
 	expectedBytes := uint64(blockSize * count)
+	
+	// 如果无法解析 dd 输出，尝试从实际文件大小获取
 	if writeBytes == 0 {
-		writeBytes = expectedBytes // 如果无法解析，使用预期值
+		if info, statErr := os.Stat(testFile); statErr == nil {
+			writeBytes = uint64(info.Size())
+			if dc.Verbose {
+				fmt.Printf("DEBUG: dd 输出解析失败，从文件大小获取：%d 字节\n", writeBytes)
+			}
+		} else {
+			writeBytes = expectedBytes // 如果文件大小也无法获取，使用预期值
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 无法获取文件大小，使用预期值：%d 字节\n", writeBytes)
+			}
+		}
 	}
 
 	// 验证写入完整性（允许 1% 误差）
 	if float64(writeBytes) < float64(expectedBytes)*0.99 {
-		return 0, 0, fmt.Errorf("写入数据不完整：预期 %d 字节，实际 %d 字节", expectedBytes, writeBytes)
+		// 如果实际文件大小与预期差异较大，返回错误
+		if info, statErr := os.Stat(testFile); statErr == nil {
+			actualSize := uint64(info.Size())
+			if float64(actualSize) < float64(expectedBytes)*0.99 {
+				return 0, 0, fmt.Errorf("写入数据不完整：预期 %d 字节，实际 %d 字节", expectedBytes, actualSize)
+			}
+			// 如果文件大小正常，使用文件大小
+			writeBytes = actualSize
+		} else {
+			return 0, 0, fmt.Errorf("写入数据不完整：预期 %d 字节，实际 %d 字节", expectedBytes, writeBytes)
+		}
+	}
+
+	if dc.Verbose {
+		fmt.Printf("DEBUG: 写入测试完成：%d 字节，耗时 %.2f 秒\n", writeBytes, writeDuration)
 	}
 
 	return writeBytes, writeDuration, nil
@@ -710,7 +736,18 @@ func (dc *DiskChecker) runReadTest(testFile string, blockSize int) (uint64, floa
 		// 如果无法解析，尝试从文件大小获取
 		if info, statErr := os.Stat(testFile); statErr == nil {
 			readBytes = uint64(info.Size())
+			if dc.Verbose {
+				fmt.Printf("DEBUG: dd 输出解析失败，从文件大小获取：%d 字节\n", readBytes)
+			}
+		} else {
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 无法获取文件大小\n")
+			}
 		}
+	}
+
+	if dc.Verbose {
+		fmt.Printf("DEBUG: 读取测试完成：%d 字节，耗时 %.2f 秒\n", readBytes, readDuration)
 	}
 
 	return readBytes, readDuration, nil
@@ -731,27 +768,125 @@ func (dc *DiskChecker) dropCaches() {
 }
 
 // parseDDOutput 解析 dd 命令输出，提取字节数
+// 支持多种 dd 输出格式（不同 Linux 发行版可能格式不同）
 func (dc *DiskChecker) parseDDOutput(output string) uint64 {
-	// 匹配 "X bytes copied" 或 "X 字节已复制"
+	if dc.Verbose {
+		fmt.Printf("DEBUG: dd 输出：%s\n", output)
+	}
+
+	// 1. 匹配 "X bytes copied" 格式（最常见）
 	re := regexp.MustCompile(`(\d+)\s*bytes`)
 	matches := re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
 		bytes, err := strconv.ParseUint(matches[1], 10, 64)
 		if err == nil {
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 解析 dd 输出 [bytes 格式]: %d 字节\n", bytes)
+			}
 			return bytes
 		}
 	}
 
-	// 尝试匹配中文输出
+	// 2. 尝试匹配中文输出 "X 字节已复制"
 	re = regexp.MustCompile(`(\d+)\s*字节`)
 	matches = re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
 		bytes, err := strconv.ParseUint(matches[1], 10, 64)
 		if err == nil {
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 解析 dd 输出 [中文字节格式]: %d 字节\n", bytes)
+			}
 			return bytes
 		}
 	}
 
+	// 3. 匹配 "X.X GB copied" 或 "X.X MB copied" 格式（某些系统使用科学计数法）
+	re = regexp.MustCompile(`([\d.]+)\s*([KMGT]?B)\s+copied`)
+	matches = re.FindStringSubmatch(output)
+	if len(matches) >= 3 {
+		value, err := strconv.ParseFloat(matches[1], 64)
+		if err == nil {
+			unit := strings.ToUpper(matches[2])
+			var bytes uint64
+			switch unit {
+			case "KB":
+				bytes = uint64(value * 1024)
+			case "MB":
+				bytes = uint64(value * 1024 * 1024)
+			case "GB":
+				bytes = uint64(value * 1024 * 1024 * 1024)
+			case "TB":
+				bytes = uint64(value * 1024 * 1024 * 1024 * 1024)
+			default:
+				bytes = uint64(value)
+			}
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 解析 dd 输出 [GB/MB 格式]: %d 字节 (%.2f %s)\n", bytes, value, unit)
+			}
+			return bytes
+		}
+	}
+
+	// 4. 匹配 "X.X GiB copied" 格式（二进制单位）
+	re = regexp.MustCompile(`([\d.]+)\s*([KMGT]?iB)\s+copied`)
+	matches = re.FindStringSubmatch(output)
+	if len(matches) >= 3 {
+		value, err := strconv.ParseFloat(matches[1], 64)
+		if err == nil {
+			unit := strings.ToUpper(matches[2])
+			var bytes uint64
+			switch unit {
+			case "KIB":
+				bytes = uint64(value * 1024)
+			case "MIB":
+				bytes = uint64(value * 1024 * 1024)
+			case "GIB":
+				bytes = uint64(value * 1024 * 1024 * 1024)
+			case "TIB":
+				bytes = uint64(value * 1024 * 1024 * 1024 * 1024)
+			default:
+				bytes = uint64(value)
+			}
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 解析 dd 输出 [GiB/MiB 格式]: %d 字节 (%.2f %s)\n", bytes, value, unit)
+			}
+			return bytes
+		}
+	}
+
+	// 5. 匹配 "(X.X GB, X GiB)" 格式中的字节数（括号内的详细格式）
+	re = regexp.MustCompile(`\((\d+)\s*bytes`)
+	matches = re.FindStringSubmatch(output)
+	if len(matches) >= 2 {
+		bytes, err := strconv.ParseUint(matches[1], 10, 64)
+		if err == nil {
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 解析 dd 输出 [括号 bytes 格式]: %d 字节\n", bytes)
+			}
+			return bytes
+		}
+	}
+
+	// 6. 匹配 "copied" 关键字，尝试从上下文中提取数字
+	re = regexp.MustCompile(`copied`)
+	if re.MatchString(output) {
+		// 尝试提取第一个数字序列
+		re = regexp.MustCompile(`(\d{6,})`)
+		matches = re.FindStringSubmatch(output)
+		if len(matches) >= 2 {
+			bytes, err := strconv.ParseUint(matches[1], 10, 64)
+			if err == nil {
+				if dc.Verbose {
+					fmt.Printf("DEBUG: 解析 dd 输出 [copied 格式]: %d 字节\n", bytes)
+				}
+				return bytes
+			}
+		}
+	}
+
+	if dc.Verbose {
+		fmt.Printf("DEBUG: 无法解析 dd 输出，返回 0\n")
+	}
 	return 0
 }
 
