@@ -398,6 +398,13 @@ func main() {
 		rep.PrintSummary(diskResults, streamResults, networkResults)
 	}
 
+	// 生成 HTML 报告（如果指定了）
+	if cfg.ReportFormat == "html" {
+		if err := generateHTMLReport(cfg, allSystemInfos, diskResults, streamResults, networkResults, latencyResults); err != nil {
+			rep.PrintError(fmt.Errorf("生成 HTML 报告失败：%v", err))
+		}
+	}
+
 	fmt.Println("测试完成。")
 }
 
@@ -425,6 +432,8 @@ func parseFlags() *config.Config {
 	flag.IntVar(&cfg.LatencyBlockSize, "latency-bs", 4, "延迟和 IOPS 测试块大小 (KB)")
 	flag.StringVar(&cfg.IOStatInterval, "iostat-interval", "1s", "IO 统计采样间隔")
 	flag.StringVar(&cfg.NetQualityTarget, "net-quality-target", "", "网络质量测试目标主机")
+	flag.StringVar(&cfg.ReportFormat, "report", "", "报告格式：html,json,table（默认 table）")
+	flag.StringVar(&cfg.ReportOutput, "output", "", "报告输出文件路径（默认当前目录）")
 
 	// 多值参数处理
 	var hosts multiStringFlag
@@ -788,4 +797,30 @@ func getInt(m map[string]interface{}, key string) int {
 		}
 	}
 	return 0
+}
+
+// generateHTMLReport 生成 HTML 报告
+func generateHTMLReport(
+	cfg *config.Config,
+	systemInfos []*checker.SystemInfo,
+	diskResults []*checker.DiskResult,
+	streamResults []*checker.StreamResult,
+	networkResults []checker.NetworkResult,
+	latencyResults []*checker.LatencyResult,
+) error {
+	htmlRep := reporter.NewHTMLReporter(cfg.ReportOutput, cfg.Verbose)
+
+	if err := htmlRep.GenerateReport(
+		systemInfos,
+		diskResults,
+		streamResults,
+		networkResults,
+		latencyResults,
+		nil, // hardwareInfos
+	); err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✅ HTML 报告已生成：%s\n", cfg.ReportOutput)
+	return nil
 }

@@ -85,6 +85,10 @@ type Config struct {
 	IOStatDevices []string
 	// NetQualityTarget 网络质量测试目标主机
 	NetQualityTarget string
+	// ReportFormat 报告格式（html, json, table）
+	ReportFormat string
+	// ReportOutput 报告输出文件路径
+	ReportOutput string
 	// SSHAuthFile SSH 认证配置文件路径
 	SSHAuthFile string
 	// SSHAuthMap 主机认证信息映射（从 SSHAuthFile 解析）
