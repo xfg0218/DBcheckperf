@@ -525,3 +525,260 @@ func BenchmarkMaxSlice(b *testing.B) {
 		MaxSlice(values)
 	}
 }
+
+// ==================== CreateTestFile 测试 ====================
+
+func TestCreateTestFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		filename    string
+		size        uint64
+		expectError bool
+	}{
+		{"创建 1MB 文件", filepath.Join(tmpDir, "test_1mb.bin"), 1024 * 1024, false},
+		{"创建 10KB 文件", filepath.Join(tmpDir, "test_10kb.bin"), 10 * 1024, false},
+		{"创建 0 字节文件", filepath.Join(tmpDir, "test_empty.bin"), 0, false},
+		{"创建到不存在的目录", "/nonexistent/dir/test.bin", 1024, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CreateTestFile(tt.filename, tt.size)
+
+			if tt.expectError && err == nil {
+				t.Errorf("CreateTestFile() 期望错误，但返回 nil")
+			}
+
+			if !tt.expectError && err != nil {
+				t.Errorf("CreateTestFile() 意外错误：%v", err)
+			}
+
+			if !tt.expectError {
+				// 验证文件大小
+				info, statErr := os.Stat(tt.filename)
+				if statErr != nil {
+					t.Errorf("文件不存在：%v", statErr)
+				} else if uint64(info.Size()) != tt.size {
+					t.Errorf("文件大小 = %d; 期望 %d", info.Size(), tt.size)
+				}
+			}
+		})
+	}
+}
+
+// ==================== ReadSSHAuthFile 测试 ====================
+
+func TestReadSSHAuthFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 创建测试 SSH 认证文件
+	authFileContent := `# 这是注释
+192.168.1.100 username password123 22
+192.168.1.101 admin secret456 2222
+server3 root rootpassword
+# 另一个注释
+
+192.168.1.102 test test123 22
+`
+	authFilePath := filepath.Join(tmpDir, "ssh_auth.txt")
+	err := os.WriteFile(authFilePath, []byte(authFileContent), 0644)
+	if err != nil {
+		t.Fatalf("创建测试 SSH 认证文件失败：%v", err)
+	}
+
+	// 测试正常读取
+	authMap, err := ReadSSHAuthFile(authFilePath)
+	if err != nil {
+		t.Fatalf("ReadSSHAuthFile() 意外失败：%v", err)
+	}
+
+	// 验证解析结果
+	if len(authMap) != 4 {
+		t.Errorf("ReadSSHAuthFile() 返回 %d 个认证信息; 期望 4", len(authMap))
+	}
+
+	// 验证具体字段
+	if info, ok := authMap["192.168.1.100"]; ok {
+		if info.Username != "username" {
+			t.Errorf("Username = %q; 期望 \"username\"", info.Username)
+		}
+		if info.Password != "password123" {
+			t.Errorf("Password = %q; 期望 \"password123\"", info.Password)
+		}
+		if info.Port != 22 {
+			t.Errorf("Port = %d; 期望 22", info.Port)
+		}
+	}
+
+	if info, ok := authMap["192.168.1.101"]; ok {
+		if info.Port != 2222 {
+			t.Errorf("Port = %d; 期望 2222", info.Port)
+		}
+	}
+
+	if info, ok := authMap["server3"]; ok {
+		if info.Port != 22 {
+			t.Errorf("默认端口 = %d; 期望 22", info.Port)
+		}
+	}
+
+	// 测试不存在的文件
+	_, err = ReadSSHAuthFile(filepath.Join(tmpDir, "not_exists.txt"))
+	if err == nil {
+		t.Error("ReadSSHAuthFile() 读取不存在的文件时应该返回错误")
+	}
+}
+
+func TestReadSSHAuthFile_EmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 创建空文件
+	authFilePath := filepath.Join(tmpDir, "empty_auth.txt")
+	err := os.WriteFile(authFilePath, []byte(""), 0644)
+	if err != nil {
+		t.Fatalf("创建空文件失败：%v", err)
+	}
+
+	authMap, err := ReadSSHAuthFile(authFilePath)
+	if err != nil {
+		t.Fatalf("ReadSSHAuthFile() 意外失败：%v", err)
+	}
+
+	if len(authMap) != 0 {
+		t.Errorf("空文件应该返回空的认证 map")
+	}
+}
+
+func TestReadSSHAuthFile_InvalidFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 创建格式不正确的文件
+	authFileContent := `invalid_line_only_one_field
+192.168.1.100 only_two_fields
+valid_host username password 22
+`
+	authFilePath := filepath.Join(tmpDir, "invalid_auth.txt")
+	err := os.WriteFile(authFilePath, []byte(authFileContent), 0644)
+	if err != nil {
+		t.Fatalf("创建测试文件失败：%v", err)
+	}
+
+	authMap, err := ReadSSHAuthFile(authFilePath)
+	if err != nil {
+		t.Fatalf("ReadSSHAuthFile() 意外失败：%v", err)
+	}
+
+	// 应该只解析有效行
+	if len(authMap) != 1 {
+		t.Errorf("ReadSSHAuthFile() 应该只解析有效行，返回 %d 个认证信息", len(authMap))
+	}
+
+	if _, ok := authMap["valid_host"]; !ok {
+		t.Error("应该解析出 valid_host 的认证信息")
+	}
+}
+
+// ==================== SSHAuthInfoToConfig 测试 ====================
+
+func TestSSHAuthInfoToConfig(t *testing.T) {
+	auth := SSHAuthInfo{
+		Username: "testuser",
+		Password: "testpass",
+		Port:     2222,
+	}
+
+	result := SSHAuthInfoToConfig(auth)
+
+	if result.Username != "testuser" {
+		t.Errorf("Username = %q; 期望 \"testuser\"", result.Username)
+	}
+	if result.Password != "testpass" {
+		t.Errorf("Password = %q; 期望 \"testpass\"", result.Password)
+	}
+	if result.Port != 2222 {
+		t.Errorf("Port = %d; 期望 2222", result.Port)
+	}
+}
+
+func TestSSHAuthInfoToConfig_DefaultPort(t *testing.T) {
+	auth := SSHAuthInfo{
+		Username: "testuser",
+		Password: "testpass",
+		Port:     22,
+	}
+
+	result := SSHAuthInfoToConfig(auth)
+
+	if result.Port != 22 {
+		t.Errorf("Port = %d; 期望 22", result.Port)
+	}
+}
+
+// ==================== SSHAuthInfoMapToConfig 测试 ====================
+
+func TestSSHAuthInfoMapToConfig(t *testing.T) {
+	authMap := map[string]SSHAuthInfo{
+		"host1": {Username: "user1", Password: "pass1", Port: 22},
+		"host2": {Username: "user2", Password: "pass2", Port: 2222},
+	}
+
+	result := SSHAuthInfoMapToConfig(authMap)
+
+	if len(result) != 2 {
+		t.Errorf("SSHAuthInfoMapToConfig() 返回 %d 个认证信息; 期望 2", len(result))
+	}
+
+	if info, ok := result["host1"]; ok {
+		if info.Username != "user1" {
+			t.Errorf("Username = %q; 期望 \"user1\"", info.Username)
+		}
+		if info.Port != 22 {
+			t.Errorf("Port = %d; 期望 22", info.Port)
+		}
+	}
+
+	if info, ok := result["host2"]; ok {
+		if info.Port != 2222 {
+			t.Errorf("Port = %d; 期望 2222", info.Port)
+		}
+	}
+}
+
+func TestSSHAuthInfoMapToConfig_Empty(t *testing.T) {
+	authMap := make(map[string]SSHAuthInfo)
+	result := SSHAuthInfoMapToConfig(authMap)
+
+	if len(result) != 0 {
+		t.Errorf("空 map 应该返回空结果")
+	}
+}
+
+// ==================== 基准测试 - 新增 ====================
+
+func BenchmarkCreateTestFile(b *testing.B) {
+	tmpDir := b.TempDir()
+	filename := filepath.Join(tmpDir, "benchmark.bin")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		CreateTestFile(filename, 1024*1024)
+		os.Remove(filename)
+	}
+}
+
+func BenchmarkReadSSHAuthFile(b *testing.B) {
+	tmpDir := b.TempDir()
+	authFileContent := `192.168.1.100 username password123 22
+192.168.1.101 admin secret456 2222
+server3 root rootpassword
+`
+	authFilePath := filepath.Join(tmpDir, "ssh_auth.txt")
+	os.WriteFile(authFilePath, []byte(authFileContent), 0644)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ReadSSHAuthFile(authFilePath)
+	}
+}
