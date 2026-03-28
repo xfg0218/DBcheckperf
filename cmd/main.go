@@ -591,7 +591,27 @@ func runHardwareMode(cfg *config.Config, rep *reporter.Reporter) {
 			})
 		} else {
 			// 远程主机，使用 SSH 连接
-			remoteInfo := hardwareChecker.RunRemote(host)
+			var remoteInfo *checker.RemoteHardwareInfo
+			
+			// 如果配置了 SSH 认证文件，使用密码认证
+			if cfg.SSHAuthFile != "" && cfg.SSHAuthMap != nil {
+				if authInfo, ok := cfg.SSHAuthMap[host]; ok {
+					remoteInfo = hardwareChecker.RunRemoteWithAuth(host, authInfo.Username, authInfo.Password, authInfo.Port)
+				} else {
+					// 尝试使用 IP 地址匹配
+					ip := checker.ResolveToIP(host)
+					if authInfo, ok := cfg.SSHAuthMap[ip]; ok {
+						remoteInfo = hardwareChecker.RunRemoteWithAuth(ip, authInfo.Username, authInfo.Password, authInfo.Port)
+					} else {
+						rep.PrintVerbose("警告：主机 %s 未找到 SSH 认证信息\n", host)
+						continue
+					}
+				}
+			} else {
+				// 使用传统 SSH 免密登录
+				remoteInfo = hardwareChecker.RunRemote(host)
+			}
+			
 			if remoteInfo.Error != nil {
 				rep.PrintVerbose("警告：主机 %s 硬件信息收集失败：%v\n", host, remoteInfo.Error)
 				continue
