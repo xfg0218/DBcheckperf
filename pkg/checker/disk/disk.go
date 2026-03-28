@@ -154,7 +154,19 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 	}
 
 	// 确保测试完成后清理文件
-	defer os.Remove(testFile)
+	defer func() {
+		if dc.Verbose {
+			fmt.Printf("DEBUG: 清理测试文件：%s\n", testFile)
+		}
+		if err := os.Remove(testFile); err != nil {
+			// 如果文件已经不存在，忽略错误
+			if !os.IsNotExist(err) {
+				fmt.Printf("警告：清理测试文件失败：%v\n", err)
+			}
+		} else if dc.Verbose {
+			fmt.Printf("DEBUG: 测试文件已清理：%s\n", testFile)
+		}
+	}()
 
 	// 执行写入测试
 	writeBytes, writeTime, err = dc.runWriteTest(testFile, ioBlockSize, count)
@@ -246,7 +258,19 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 
 	// 确保测试完成后清理文件
 	defer func() {
-		dc.runSSHCommand(host, fmt.Sprintf("rm -f %s", testFile))
+		if dc.Verbose {
+			fmt.Printf("DEBUG: 清理远程测试文件：%s@%s\n", testFile, host)
+		}
+		// 使用更可靠的清理命令，验证清理结果
+		cleanupCmd := fmt.Sprintf("rm -f %s && echo 'CLEANED' || echo 'FAILED'", testFile)
+		cleanupOutput, _ := dc.runSSHCommand(host, cleanupCmd)
+		if dc.Verbose {
+			if strings.Contains(cleanupOutput, "CLEANED") {
+				fmt.Printf("DEBUG: 远程测试文件已清理：%s\n", testFile)
+			} else {
+				fmt.Printf("DEBUG: 远程测试文件清理结果：%s\n", cleanupOutput)
+			}
+		}
 	}()
 
 	// 执行写入测试
@@ -571,7 +595,19 @@ func (dc *DiskChecker) RunRemoteWithAuth(hostname, username, password string, po
 
 	// 确保测试完成后清理文件
 	defer func() {
-		dc.runSSHCommandWithAuth(hostname, username, password, port, fmt.Sprintf("rm -f %s", testFile))
+		if dc.Verbose {
+			fmt.Printf("DEBUG: 清理远程测试文件（密码认证）：%s@%s\n", testFile, hostname)
+		}
+		// 使用更可靠的清理命令，验证清理结果
+		cleanupCmd := fmt.Sprintf("rm -f %s && echo 'CLEANED' || echo 'FAILED'", testFile)
+		cleanupOutput, _ := dc.runSSHCommandWithAuth(hostname, username, password, port, cleanupCmd)
+		if dc.Verbose {
+			if strings.Contains(cleanupOutput, "CLEANED") {
+				fmt.Printf("DEBUG: 远程测试文件已清理（密码认证）：%s\n", testFile)
+			} else {
+				fmt.Printf("DEBUG: 远程测试文件清理结果（密码认证）：%s\n", cleanupOutput)
+			}
+		}
 	}()
 
 	// 执行写入测试
@@ -950,6 +986,9 @@ func (dc *DiskChecker) runRandomWrite(testFile string, blockSize, count int, fil
 		var errBuf bytes.Buffer
 		cmd.Stderr = &errBuf
 
+		// 设置超时时间（5 秒），防止 dd 进程挂起
+		cmd.WaitDelay = 5 * time.Second
+
 		if err := cmd.Run(); err != nil {
 			// 尝试降级参数
 			cmd = exec.Command("dd", "if=/dev/zero", fmt.Sprintf("of=%s", testFile),
@@ -957,6 +996,7 @@ func (dc *DiskChecker) runRandomWrite(testFile string, blockSize, count int, fil
 				fmt.Sprintf("seek=%d", offset/int64(blockSize)),
 				"conv=notrunc,fsync")
 			cmd.Stderr = &errBuf
+			cmd.WaitDelay = 5 * time.Second
 			if err := cmd.Run(); err != nil {
 				// 继续尝试，不中断测试
 				continue
@@ -991,12 +1031,16 @@ func (dc *DiskChecker) runRandomRead(testFile string, blockSize, count int, file
 		var errBuf bytes.Buffer
 		cmd.Stderr = &errBuf
 
+		// 设置超时时间（5 秒），防止 dd 进程挂起
+		cmd.WaitDelay = 5 * time.Second
+
 		if err := cmd.Run(); err != nil {
 			// 尝试降级参数
 			cmd = exec.Command("dd", fmt.Sprintf("if=%s", testFile), "of=/dev/null",
 				fmt.Sprintf("bs=%d", blockSize), "count=1",
 				fmt.Sprintf("skip=%d", offset/int64(blockSize)))
 			cmd.Stderr = &errBuf
+			cmd.WaitDelay = 5 * time.Second
 			if err := cmd.Run(); err != nil {
 				// 继续尝试，不中断测试
 				continue
