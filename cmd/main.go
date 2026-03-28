@@ -21,7 +21,7 @@ import (
 )
 
 // 版本号
-const Version = "1.4.1"
+const Version = "1.4.2"
 
 func main() {
 	// 解析命令行参数
