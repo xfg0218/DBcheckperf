@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"dbcheckperf/pkg/checker/common"
+	"dbcheckperf/pkg/installer"
 	"dbcheckperf/pkg/utils"
 )
 
@@ -201,7 +202,14 @@ func (lc *LatencyChecker) measureWriteLatency(testFile string) ([]float64, error
 func (lc *LatencyChecker) runFioTest(dir string) (*LatencyResult, error) {
 	// 检查 fio 是否可用
 	if _, err := exec.LookPath("fio"); err != nil {
-		return nil, fmt.Errorf("fio 不可用")
+		// 尝试自动安装
+		if lc.Verbose {
+			fmt.Printf("fio 未安装，尝试自动安装...\n")
+		}
+		installer := installer.NewToolInstaller(lc.Verbose, true, 300)
+		if _, installErr := installer.EnsureFio(); installErr != nil {
+			return nil, fmt.Errorf("fio 不可用且无法自动安装：%v", err)
+		}
 	}
 
 	result := &LatencyResult{

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"dbcheckperf/pkg/checker/common"
+	"dbcheckperf/pkg/installer"
 	"dbcheckperf/pkg/utils"
 )
 
@@ -218,7 +219,14 @@ func (nc *NetworkChecker) testWithTCP(remoteHost string) (float64, error) {
 func (nc *NetworkChecker) testWithIperf(remoteHost string) (float64, error) {
 	// 检查 iperf3 是否可用
 	if _, err := exec.LookPath("iperf3"); err != nil {
-		return 0, fmt.Errorf("iperf3 不可用")
+		// 尝试自动安装
+		if nc.Verbose {
+			fmt.Printf("iperf3 未安装，尝试自动安装...\n")
+		}
+		installer := installer.NewToolInstaller(nc.Verbose, true, 300)
+		if _, installErr := installer.EnsureIperf3(); installErr != nil {
+			return 0, fmt.Errorf("iperf3 不可用且无法自动安装：%v", err)
+		}
 	}
 
 	// 运行 iperf3 客户端测试
