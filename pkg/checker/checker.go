@@ -350,8 +350,8 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 		info.RAIDInfo = hc.getRAIDInfo()
 	} else {
 		info.RAIDInfo = &RAIDConfigInfo{
-			HasRAID:      false,
-			StripeSize:   64,
+			HasRAID:       false,
+			StripeSize:    64,
 			BatteryBackup: false,
 		}
 	}
@@ -365,10 +365,10 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 // getCPUInfo 获取 CPU 信息
 func (hc *HardwareChecker) getCPUInfo() *CPUInfo {
 	cpu := &CPUInfo{
-		Model:      "Unknown",
-		Cores:      1,
-		Sockets:    1,
-		NUMANodes:  1,
+		Model:     "Unknown",
+		Cores:     1,
+		Sockets:   1,
+		NUMANodes: 1,
 	}
 
 	// 读取 /proc/cpuinfo
@@ -444,10 +444,10 @@ func (hc *HardwareChecker) getCPUInfo() *CPUInfo {
 // getMemoryInfo 获取内存信息
 func (hc *HardwareChecker) getMemoryInfo() *MemoryInfo {
 	mem := &MemoryInfo{
-		MemoryType:   "RAM",
-		MemorySpeed:  0,
-		MemorySlots:  0,
-		NUMANodes:    1,
+		MemoryType:  "RAM",
+		MemorySpeed: 0,
+		MemorySlots: 0,
+		NUMANodes:   1,
 	}
 
 	// 获取总内存 - 优先使用 utils.GetTotalRAM()
@@ -648,7 +648,7 @@ func (hc *HardwareChecker) getDiskInfosFromLsblk() []*DiskInfo {
 	// 先尝试标准格式，失败后尝试旧格式
 	cmd := exec.Command("lsblk", "-bdn", "-o", "NAME,SIZE,ROTA,TYPE,MODEL")
 	output, err := cmd.Output()
-	
+
 	// 如果失败，尝试 CentOS 7 的旧格式（无 -o 参数）
 	if err != nil {
 		cmd = exec.Command("lsblk", "-bdn")
@@ -779,8 +779,8 @@ func (hc *HardwareChecker) getSingleDiskInfo(name string) *DiskInfo {
 // getRAIDInfo 获取 RAID 信息
 func (hc *HardwareChecker) getRAIDInfo() *RAIDConfigInfo {
 	raid := &RAIDConfigInfo{
-		HasRAID:      false,
-		StripeSize:   64, // 默认条带大小
+		HasRAID:       false,
+		StripeSize:    64, // 默认条带大小
 		BatteryBackup: false,
 	}
 
@@ -973,13 +973,13 @@ func (hc *HardwareChecker) getNICInfosFromIpLink() []*NICInfo {
 // getSingleNICInfo 获取单个网卡信息
 func (hc *HardwareChecker) getSingleNICInfo(name string) *NICInfo {
 	nic := &NICInfo{
-		Name:     name,
-		Speed:    0,
-		IsBond:   false,
-		BondMode: "",
+		Name:       name,
+		Speed:      0,
+		IsBond:     false,
+		BondMode:   "",
 		BondSlaves: 0,
-		MTU:      1500,
-		Driver:   "Unknown",
+		MTU:        1500,
+		Driver:     "Unknown",
 		MACAddress: "",
 	}
 
@@ -1076,7 +1076,7 @@ func (hc *HardwareChecker) RunRemote(host string) *RemoteHardwareInfo {
 	// 默认返回错误，因为需要 SSH 认证信息
 	// 实际调用应该使用 RunRemoteWithAuth
 	return &RemoteHardwareInfo{
-		Host: host,
+		Host:  host,
 		Error: fmt.Errorf("需要使用 SSH 认证信息调用 RunRemoteWithAuth"),
 	}
 }
@@ -1447,14 +1447,14 @@ func AggregateDiskResults(results []*DiskResult, write bool) *AggregateResults {
 	}
 
 	return &AggregateResults{
-		MinValue:   minVal,
-		MaxValue:   maxVal,
-		AvgValue:   sum / float64(len(values)),
+		MinValue:    minVal,
+		MaxValue:    maxVal,
+		AvgValue:    sum / float64(len(values)),
 		MedianValue: calculateMedian(values),
-		MinHost:    minHost,
-		MaxHost:    maxHost,
-		TotalValue: sum,
-		Count:      len(values),
+		MinHost:     minHost,
+		MaxHost:     maxHost,
+		TotalValue:  sum,
+		Count:       len(values),
 	}
 }
 
@@ -1494,12 +1494,12 @@ func AggregateDiskRandResults(results []*DiskResult, write bool) *AggregateResul
 	}
 
 	return &AggregateResults{
-		MinValue:   minVal,
-		MaxValue:   maxVal,
-		AvgValue:   sum / float64(len(values)),
+		MinValue:    minVal,
+		MaxValue:    maxVal,
+		AvgValue:    sum / float64(len(values)),
 		MedianValue: calculateMedian(values),
-		TotalValue: sum,
-		Count:      len(values),
+		TotalValue:  sum,
+		Count:       len(values),
 	}
 }
 
@@ -1534,12 +1534,12 @@ func AggregateNetworkResults(results []NetworkResult) *AggregateResults {
 	}
 
 	return &AggregateResults{
-		MinValue:   minVal,
-		MaxValue:   maxVal,
-		AvgValue:   sum / float64(len(values)),
+		MinValue:    minVal,
+		MaxValue:    maxVal,
+		AvgValue:    sum / float64(len(values)),
 		MedianValue: calculateMedian(values),
-		TotalValue: sum,
-		Count:      len(values),
+		TotalValue:  sum,
+		Count:       len(values),
 	}
 }
 
