@@ -35,21 +35,26 @@ dbcheckperf/
         └── utils.go        # 工具函数（字节转换、文件操作等）
 ```
 
-### 模块说明
+### 模块说明（v1.6.0）
 
 | 模块 | 文件 | 行数 | 功能描述 |
 |------|------|------|----------|
 | **common** | `common/common.go` | ~160 | IP 地址解析、SSH 命令执行（支持免密和密码认证）、主机名获取 |
 | **disk** | `disk/disk.go` | ~1450 | 磁盘顺序读写、随机读写、磁盘类型/型号/容量/文件系统检测（支持 SSH 密码认证） |
-| **network** | `network/network.go` | 680 | 网络性能测试（串行/并行/全矩阵模式）+ 网络质量检测（延迟/丢包/重传） |
+| **network** | `network/network.go` | ~700 | 网络性能测试（串行/并行/全矩阵模式）+ 网络质量检测（延迟/丢包/重传）+ iperf3 自动安装 |
 | **memory** | `memory/memory.go` | 203 | 内存带宽测试（STREAM 基准） |
 | **system** | `system/system.go` | 555 | 系统信息收集（CPU、内存、磁盘、虚拟化、RAID、网卡绑定等） |
-| **latency** | `latency/latency.go` | 530 | 磁盘读写延迟测试、IOPS 测试（支持 dd/fio） |
+| **latency** | `latency/latency.go` | ~550 | 磁盘读写延迟测试、IOPS 测试（支持 dd/fio + fio 自动安装） |
 | **iostat** | `iostat/iostat.go` | 455 | IO 统计监控（r/s, w/s, await, %util, avgqu-sz 等） |
 | **numa** | `numa/numa.go` | 480 | NUMA 节点信息、内存分布、CPU 亲和性 |
 | **kernel** | `kernel/kernel.go` | 532 | 内核参数收集（VM/IO/网络参数，支持告警检查） |
 | **checker.go** | `checker.go` | 420 | 主 API 入口、类型别名、向后兼容 |
 | **utils** | `utils/utils.go` | ~340 | 工具函数（字节转换、文件操作、SSH 认证文件解析等） |
+| **installer** ✨ | `installer/installer.go` | ~430 | 测试工具自动安装器（fio/iperf3/netperf），支持 6 种包管理器 |
+| **progress** ✨ | `progress/progress.go` | ~350 | 进度条和预估时间显示（ProgressBar/StepTracker/TaskEstimator） |
+| **history** ✨ | `history/history.go` | ~530 | 历史数据管理（JSON 存储、标签搜索、性能对比） |
+| **advisor** ✨ | `advisor/advisor.go` | ~520 | 智能告警与优化建议（性能评分、健康状态、优化建议） |
+| **html_reporter** ✨ | `reporter/html_reporter.go` | ~630 | HTML 报告生成器（响应式设计、紫色主题） |
 
 ### 重构和增强历史
 
@@ -304,17 +309,22 @@ go build -o dbcheckperf ./cmd/main.go
 | `-S <大小>` | 磁盘测试文件大小 | 2xRAM |
 | `-D` | 显示每台主机详情 | false |
 | `-v` | 详细模式 | false |
+| `-V` | 非常详细模式 | false |
 | `--duration` | 网络测试时长 | 15s |
 | `--random-bs <KB>` | 随机读写块大小 | 4 |
 | `--latency-bs <KB>` | 延迟和 IOPS 测试块大小 | 4 |
 | `--iostat-interval` | IO 统计采样间隔 | 1s |
 | `--net-quality-target` | 网络质量测试目标主机 | - |
 | `--netperf` | 使用 netperf 进行网络测试 | false |
+| `--buffer-size <KB>` | 网络测试缓冲区大小 | 8 |
+| `--report <格式>` | 报告格式：html,json,table（v1.6.0 新增） | table |
+| `--output <路径>` | 报告输出文件路径（v1.6.0 新增） | 当前目录 |
 | `--version` | 显示版本号 | - |
 | `-?` | 显示帮助信息 | - |
 
 ## 输出格式
 
+### 表格输出（默认）
 - **系统信息表格**: 主机名、CPU 核心数、内存大小、网卡速率
 - **磁盘测试结果**: 写入/读取时间、数据量、带宽
 - **内存带宽结果**: 复制、缩放、加法、三合一带宽
@@ -326,6 +336,25 @@ go build -o dbcheckperf ./cmd/main.go
 - **网络质量**: 延迟、丢包率、错包率、TCP 重传率、MTU
 - **磁盘详细信息**: 磁盘类型、型号、容量、文件系统、可用空间、inode 使用率
 - **汇总报告**: 各项测试的平均、最小、最大带宽
+
+### HTML 报告（v1.6.0 新增）
+- **响应式设计**: 支持桌面和移动设备
+- **紫色主题**: 渐变紫色现代化 UI
+- **报告概览**: 性能评分、健康状态、摘要
+- **指标卡片**: 磁盘 I/O、内存带宽、网络性能
+- **详细表格**: 系统信息、硬件信息、测试结果
+- **时间戳**: 测试完成时间
+
+### JSON 报告（v1.6.0 新增）
+- **结构化数据**: 便于集成到监控系统
+- **完整结果**: 包含所有测试数据
+- **机器可读**: 便于自动化处理
+
+### 智能告警（v1.6.0 新增）
+- **性能评分**: 0-100 分
+- **健康状态**: 优秀/良好/一般/需优化
+- **告警级别**: INFO/WARNING/CRITICAL
+- **优化建议**: 具体可行的改进建议
 
 ## 开发约定
 
@@ -391,11 +420,94 @@ go build -o dbcheckperf ./cmd/main.go
 
 | 版本 | 日期 | 类型 | 主要内容 |
 |------|------|------|----------|
+| v1.6.0 | 2026-03-28 | 用户体验增强 | HTML 报告、历史对比、智能告警、进度条 |
+| v1.5.0 | 2026-03-28 | 质量提升 | 测试覆盖率提升、CI/CD、fio/iperf3 自动部署 |
 | v1.4.2 | 2026-03-28 | 文档更新 | 改进示例用户名（gpadmin → username） |
 | v1.4.1 | 2026-03-28 | Bug 修复 | 修复 AMD 平台磁盘顺序读写测试结果为 0 的问题 |
 | v1.4.0 | 2026-03-27 | 功能版 | CentOS 7.9 虚拟机支持、详细调试输出 |
 | v1.3.1 | 2026-03-26 | Bug 修复 | 修复网络测试中的问题 |
 | v1.3.0 | 2026-03-25 | 功能版 | 模块化重构、新增延迟/IOPS/IO 统计/NUMA/内核参数模块 |
+
+### v1.6.0 详细说明 (2026-03-28)
+
+**新增功能**:
+
+1. **HTML 报告生成** 🎨
+   - 响应式设计，支持桌面和移动设备
+   - 渐变紫色主题，现代化 UI 风格
+   - 包含报告概览、系统信息、测试结果等部分
+   - 指标卡片显示关键性能数据
+   - 使用：`--report html --output report.html`
+
+2. **历史数据对比** 📊
+   - JSON 格式存储测试记录 (~/.dbcheckperf/history)
+   - 按时间戳自动排序
+   - 支持标签搜索
+   - 自动对比两个测试记录的差异
+   - 计算性能变化百分比（写入 +10%、内存 -5% 等）
+
+3. **智能告警与优化建议** ⚠️
+   - 三级告警（INFO/WARNING/CRITICAL）
+   - 性能评分系统（0-100 分）
+   - 健康状态评估（优秀/良好/一般/需优化）
+   - 自动检测性能瓶颈
+   - 提供具体优化建议
+   - 支持自定义阈值
+
+4. **进度条和预估时间** ⏱️
+   - 实时进度条显示（█░字符）
+   - 已用时间和 ETA 预估
+   - 百分比显示
+   - 步骤跟踪和切换
+   - 任务耗时记录和历史平均
+
+**新增模块**:
+- `pkg/reporter/html_reporter.go` (631 行)
+- `pkg/history/history.go` (530+ 行)
+- `pkg/advisor/advisor.go` (520+ 行)
+- `pkg/progress/progress.go` (350+ 行)
+
+**测试覆盖**:
+- 新增测试文件：4 个
+- 新增测试用例：50+
+- 所有测试通过
+
+### v1.5.0 详细说明 (2026-03-28)
+
+**新增功能**:
+
+1. **测试覆盖率提升** 📈
+   - memory 模块：0% → 86%
+   - utils 模块：40.9% → 56.4%
+   - 总体覆盖率：~4.2% → ~25%
+   - 新增测试文件：memory_test.go, utils_test.go 扩展
+
+2. **CI/CD 集成** 🔧
+   - GitHub Actions 工作流
+   - 自动化测试（push/PR 触发）
+   - 代码质量检查（golangci-lint）
+   - 多平台编译（Linux/macOS × amd64/arm64）
+   - Codecov 代码覆盖率集成
+   - 自动发布二进制文件
+
+3. **fio/iperf3 自动部署** 🚀
+   - 新增 installer 模块 (430+ 行)
+   - 支持 6 种包管理器（apt-get/yum/dnf/zypper/apk/pacman）
+   - 自动检测和版本验证
+   - 本地和远程主机安装
+   - 批量安装和超时控制
+   - 集成到 network 和 latency 模块
+
+**新增模块**:
+- `pkg/installer/installer.go` (430+ 行)
+- `pkg/installer/installer_test.go` (350+ 行)
+- `.github/workflows/ci.yml` (120 行)
+
+**测试覆盖**:
+- installer: 100%
+- progress: 100%
+- history: 100%
+- advisor: 100%
 
 ### v1.4.2 详细说明 (2026-03-28)
 
