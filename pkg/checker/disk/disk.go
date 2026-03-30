@@ -273,30 +273,42 @@ func (dc *DiskChecker) RunRemote(host string, dir string) (*DiskResult, error) {
 		}
 	}()
 
-	// 执行写入测试
+	// 执行写入测试（使用 time 命令包装 dd，获取 dd 内部时间）
 	writeCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=%d oflag=direct conv=fsync 2>&1",
 		testFile, ioBlockSize, count)
-	writeOutput, writeTime, err := dc.runSSHCommandWithTime(host, writeCmd)
+	writeOutput, _, err := dc.runSSHCommandWithTime(host, writeCmd)
 	var writeBytes uint64
+	var writeTime float64
 	if err == nil {
-		writeBytes = dc.parseDDOutput(writeOutput)
+		writeBytes, writeTime = dc.parseDDOutputAndTime(writeOutput)
 		if writeBytes == 0 {
 			writeBytes = uint64(ioBlockSize * count)
 		}
 	}
 
+	// 如果 dd 输出中没有解析到时间，使用 SSH 命令执行时间作为备用
+	if writeTime <= 0 {
+		_, writeTime, _ = dc.runSSHCommandWithTime(host, writeCmd)
+	}
+
 	// 清空远程缓存
 	dc.dropRemoteCaches(host)
 
-	// 执行读取测试
+	// 执行读取测试（使用 time 命令包装 dd，获取 dd 内部时间）
 	readCmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d iflag=direct 2>&1", testFile, ioBlockSize)
-	readOutput, readTime, err := dc.runSSHCommandWithTime(host, readCmd)
+	readOutput, _, err := dc.runSSHCommandWithTime(host, readCmd)
 	var readBytes uint64
+	var readTime float64
 	if err == nil {
-		readBytes = dc.parseDDOutput(readOutput)
+		readBytes, readTime = dc.parseDDOutputAndTime(readOutput)
 		if readBytes == 0 {
 			readBytes = writeBytes
 		}
+	}
+
+	// 如果 dd 输出中没有解析到时间，使用 SSH 命令执行时间作为备用
+	if readTime <= 0 {
+		_, readTime, _ = dc.runSSHCommandWithTime(host, readCmd)
 	}
 
 	// 设置顺序读写结果
@@ -610,30 +622,42 @@ func (dc *DiskChecker) RunRemoteWithAuth(hostname, username, password string, po
 		}
 	}()
 
-	// 执行写入测试
+	// 执行写入测试（使用 time 命令包装 dd，获取 dd 内部时间）
 	writeCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=%d count=%d oflag=direct conv=fsync 2>&1",
 		testFile, ioBlockSize, count)
-	writeOutput, writeTime, err := dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, writeCmd)
+	writeOutput, _, err := dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, writeCmd)
 	var writeBytes uint64
+	var writeTime float64
 	if err == nil {
-		writeBytes = dc.parseDDOutput(writeOutput)
+		writeBytes, writeTime = dc.parseDDOutputAndTime(writeOutput)
 		if writeBytes == 0 {
 			writeBytes = uint64(ioBlockSize * count)
 		}
 	}
 
+	// 如果 dd 输出中没有解析到时间，使用 SSH 命令执行时间作为备用
+	if writeTime <= 0 {
+		_, writeTime, _ = dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, writeCmd)
+	}
+
 	// 清空远程缓存
 	dc.dropRemoteCachesWithAuth(hostname, username, password, port)
 
-	// 执行读取测试
+	// 执行读取测试（使用 time 命令包装 dd，获取 dd 内部时间）
 	readCmd := fmt.Sprintf("dd if=%s of=/dev/null bs=%d iflag=direct 2>&1", testFile, ioBlockSize)
-	readOutput, readTime, err := dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, readCmd)
+	readOutput, _, err := dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, readCmd)
 	var readBytes uint64
+	var readTime float64
 	if err == nil {
-		readBytes = dc.parseDDOutput(readOutput)
+		readBytes, readTime = dc.parseDDOutputAndTime(readOutput)
 		if readBytes == 0 {
 			readBytes = writeBytes
 		}
+	}
+
+	// 如果 dd 输出中没有解析到时间，使用 SSH 命令执行时间作为备用
+	if readTime <= 0 {
+		_, readTime, _ = dc.runSSHCommandWithAuthAndTime(hostname, username, password, port, readCmd)
 	}
 
 	// 设置顺序读写结果
@@ -672,8 +696,6 @@ func (dc *DiskChecker) RunRemoteWithAuth(hostname, username, password string, po
 
 // runWriteTest 执行单次写入测试
 func (dc *DiskChecker) runWriteTest(testFile string, blockSize int, count int) (uint64, float64, error) {
-	writeStart := time.Now()
-
 	// 使用更严谨的参数：fsync 确保数据真正写入磁盘
 	writeCmd := exec.Command("dd", "if=/dev/zero", fmt.Sprintf("of=%s", testFile),
 		fmt.Sprintf("bs=%d", blockSize), fmt.Sprintf("count=%d", count),
@@ -697,12 +719,23 @@ func (dc *DiskChecker) runWriteTest(testFile string, blockSize int, count int) (
 		}
 	}
 
-	writeDuration := time.Since(writeStart).Seconds()
-	writeBytes := dc.parseDDOutput(writeErr.String())
+	// 解析 dd 输出，获取字节数和 dd 内部报告的时间
+	writeBytes, writeDuration := dc.parseDDOutputAndTime(writeErr.String())
+
+	// 如果 dd 输出中没有时间信息，使用 Go 测量的时间作为备用
+	if writeDuration <= 0 {
+		// 重新执行一次以测量时间（仅在 verbose 模式下）
+		if dc.Verbose {
+			fmt.Printf("DEBUG: dd 输出中未解析到时间，使用备用方法\n")
+		}
+		writeStart := time.Now()
+		writeCmd.Run()
+		writeDuration = time.Since(writeStart).Seconds()
+	}
 
 	// 验证写入的数据量
 	expectedBytes := uint64(blockSize * count)
-	
+
 	// 如果无法解析 dd 输出，尝试从实际文件大小获取
 	if writeBytes == 0 {
 		if info, statErr := os.Stat(testFile); statErr == nil {
@@ -747,8 +780,6 @@ func (dc *DiskChecker) runReadTest(testFile string, blockSize int) (uint64, floa
 		return 0, 0, fmt.Errorf("测试文件不存在：%s", testFile)
 	}
 
-	readStart := time.Now()
-
 	// 使用 iflag=direct 绕过缓存，测试真实磁盘读取性能
 	readCmd := exec.Command("dd", fmt.Sprintf("if=%s", testFile), "of=/dev/null",
 		fmt.Sprintf("bs=%d", blockSize), "iflag=direct")
@@ -765,8 +796,18 @@ func (dc *DiskChecker) runReadTest(testFile string, blockSize int) (uint64, floa
 		}
 	}
 
-	readDuration := time.Since(readStart).Seconds()
-	readBytes := dc.parseDDOutput(readErr.String())
+	// 解析 dd 输出，获取字节数和 dd 内部报告的时间
+	readBytes, readDuration := dc.parseDDOutputAndTime(readErr.String())
+
+	// 如果 dd 输出中没有时间信息，使用 Go 测量的时间作为备用
+	if readDuration <= 0 {
+		if dc.Verbose {
+			fmt.Printf("DEBUG: dd 输出中未解析到时间，使用备用方法\n")
+		}
+		readStart := time.Now()
+		readCmd.Run()
+		readDuration = time.Since(readStart).Seconds()
+	}
 
 	if readBytes == 0 {
 		// 如果无法解析，尝试从文件大小获取
@@ -806,20 +847,31 @@ func (dc *DiskChecker) dropCaches() {
 // parseDDOutput 解析 dd 命令输出，提取字节数
 // 支持多种 dd 输出格式（不同 Linux 发行版可能格式不同）
 func (dc *DiskChecker) parseDDOutput(output string) uint64 {
+	bytes, _ := dc.parseDDOutputAndTime(output)
+	return bytes
+}
+
+// parseDDOutputAndTime 解析 dd 命令输出，提取字节数和时间（秒）
+// 返回：(字节数，时间（秒）)
+// 支持多种 dd 输出格式（不同 Linux 发行版可能格式不同）
+func (dc *DiskChecker) parseDDOutputAndTime(output string) (uint64, float64) {
 	if dc.Verbose {
 		fmt.Printf("DEBUG: dd 输出：%s\n", output)
 	}
+
+	var bytes uint64
+	var seconds float64
 
 	// 1. 匹配 "X bytes copied" 格式（最常见）
 	re := regexp.MustCompile(`(\d+)\s*bytes`)
 	matches := re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
-		bytes, err := strconv.ParseUint(matches[1], 10, 64)
+		parsedBytes, err := strconv.ParseUint(matches[1], 10, 64)
 		if err == nil {
+			bytes = parsedBytes
 			if dc.Verbose {
 				fmt.Printf("DEBUG: 解析 dd 输出 [bytes 格式]: %d 字节\n", bytes)
 			}
-			return bytes
 		}
 	}
 
@@ -827,12 +879,12 @@ func (dc *DiskChecker) parseDDOutput(output string) uint64 {
 	re = regexp.MustCompile(`(\d+)\s*字节`)
 	matches = re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
-		bytes, err := strconv.ParseUint(matches[1], 10, 64)
+		parsedBytes, err := strconv.ParseUint(matches[1], 10, 64)
 		if err == nil {
+			bytes = parsedBytes
 			if dc.Verbose {
 				fmt.Printf("DEBUG: 解析 dd 输出 [中文字节格式]: %d 字节\n", bytes)
 			}
-			return bytes
 		}
 	}
 
@@ -843,23 +895,23 @@ func (dc *DiskChecker) parseDDOutput(output string) uint64 {
 		value, err := strconv.ParseFloat(matches[1], 64)
 		if err == nil {
 			unit := strings.ToUpper(matches[2])
-			var bytes uint64
+			var parsedBytes uint64
 			switch unit {
 			case "KB":
-				bytes = uint64(value * 1024)
+				parsedBytes = uint64(value * 1024)
 			case "MB":
-				bytes = uint64(value * 1024 * 1024)
+				parsedBytes = uint64(value * 1024 * 1024)
 			case "GB":
-				bytes = uint64(value * 1024 * 1024 * 1024)
+				parsedBytes = uint64(value * 1024 * 1024 * 1024)
 			case "TB":
-				bytes = uint64(value * 1024 * 1024 * 1024 * 1024)
+				parsedBytes = uint64(value * 1024 * 1024 * 1024 * 1024)
 			default:
-				bytes = uint64(value)
+				parsedBytes = uint64(value)
 			}
+			bytes = parsedBytes
 			if dc.Verbose {
 				fmt.Printf("DEBUG: 解析 dd 输出 [GB/MB 格式]: %d 字节 (%.2f %s)\n", bytes, value, unit)
 			}
-			return bytes
 		}
 	}
 
@@ -870,23 +922,23 @@ func (dc *DiskChecker) parseDDOutput(output string) uint64 {
 		value, err := strconv.ParseFloat(matches[1], 64)
 		if err == nil {
 			unit := strings.ToUpper(matches[2])
-			var bytes uint64
+			var parsedBytes uint64
 			switch unit {
 			case "KIB":
-				bytes = uint64(value * 1024)
+				parsedBytes = uint64(value * 1024)
 			case "MIB":
-				bytes = uint64(value * 1024 * 1024)
+				parsedBytes = uint64(value * 1024 * 1024)
 			case "GIB":
-				bytes = uint64(value * 1024 * 1024 * 1024)
+				parsedBytes = uint64(value * 1024 * 1024 * 1024)
 			case "TIB":
-				bytes = uint64(value * 1024 * 1024 * 1024 * 1024)
+				parsedBytes = uint64(value * 1024 * 1024 * 1024 * 1024)
 			default:
-				bytes = uint64(value)
+				parsedBytes = uint64(value)
 			}
+			bytes = parsedBytes
 			if dc.Verbose {
 				fmt.Printf("DEBUG: 解析 dd 输出 [GiB/MiB 格式]: %d 字节 (%.2f %s)\n", bytes, value, unit)
 			}
-			return bytes
 		}
 	}
 
@@ -894,36 +946,75 @@ func (dc *DiskChecker) parseDDOutput(output string) uint64 {
 	re = regexp.MustCompile(`\((\d+)\s*bytes`)
 	matches = re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
-		bytes, err := strconv.ParseUint(matches[1], 10, 64)
+		parsedBytes, err := strconv.ParseUint(matches[1], 10, 64)
 		if err == nil {
+			bytes = parsedBytes
 			if dc.Verbose {
 				fmt.Printf("DEBUG: 解析 dd 输出 [括号 bytes 格式]: %d 字节\n", bytes)
 			}
-			return bytes
 		}
 	}
 
-	// 6. 匹配 "copied" 关键字，尝试从上下文中提取数字
+	// 6. 匹配时间格式："X.XX seconds", "X.XX 秒", "real XmX.XXs"
+	// 6a. 匹配 "X.XX seconds" 或 "X.XX second"
+	timeRe := regexp.MustCompile(`([\d.]+)\s*seconds?`)
+	timeMatches := timeRe.FindStringSubmatch(output)
+	if len(timeMatches) >= 2 {
+		parsedTime, err := strconv.ParseFloat(timeMatches[1], 64)
+		if err == nil {
+			seconds = parsedTime
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 解析 dd 输出时间 [seconds 格式]: %.2f 秒\n", seconds)
+			}
+		}
+	}
+
+	// 6b. 匹配中文时间 "X.XX 秒"
+	timeRe = regexp.MustCompile(`([\d.]+)\s*秒`)
+	timeMatches = timeRe.FindStringSubmatch(output)
+	if len(timeMatches) >= 2 {
+		parsedTime, err := strconv.ParseFloat(timeMatches[1], 64)
+		if err == nil {
+			seconds = parsedTime
+			if dc.Verbose {
+				fmt.Printf("DEBUG: 解析 dd 输出时间 [中文秒格式]: %.2f 秒\n", seconds)
+			}
+		}
+	}
+
+	// 6c. 匹配 "real XmX.XXs" 格式（time 命令输出）
+	timeRe = regexp.MustCompile(`real\s+(\d+)m([\d.]+)s`)
+	timeMatches = timeRe.FindStringSubmatch(output)
+	if len(timeMatches) >= 3 {
+		minutes, _ := strconv.ParseFloat(timeMatches[1], 64)
+		secs, _ := strconv.ParseFloat(timeMatches[2], 64)
+		seconds = minutes*60 + secs
+		if dc.Verbose {
+			fmt.Printf("DEBUG: 解析 dd 输出时间 [time 格式]: %.2f 秒\n", seconds)
+		}
+	}
+
+	// 7. 匹配 "copied" 关键字，尝试从上下文中提取数字
 	re = regexp.MustCompile(`copied`)
 	if re.MatchString(output) {
 		// 尝试提取第一个数字序列
 		re = regexp.MustCompile(`(\d{6,})`)
 		matches = re.FindStringSubmatch(output)
 		if len(matches) >= 2 {
-			bytes, err := strconv.ParseUint(matches[1], 10, 64)
+			parsedBytes, err := strconv.ParseUint(matches[1], 10, 64)
 			if err == nil {
+				bytes = parsedBytes
 				if dc.Verbose {
 					fmt.Printf("DEBUG: 解析 dd 输出 [copied 格式]: %d 字节\n", bytes)
 				}
-				return bytes
 			}
 		}
 	}
 
 	if dc.Verbose {
-		fmt.Printf("DEBUG: 无法解析 dd 输出，返回 0\n")
+		fmt.Printf("DEBUG: 解析 dd 输出完成：%d 字节，%.2f 秒\n", bytes, seconds)
 	}
-	return 0
+	return bytes, seconds
 }
 
 // runRandomTest 执行随机读写测试
