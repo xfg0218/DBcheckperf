@@ -83,6 +83,10 @@ type DiskChecker struct {
 	RandBlockSize int
 	// Host 远程主机名（用于远程测试）
 	Host string
+	// UseDirectIO 是否使用直接 IO（oflag=direct）
+	UseDirectIO bool
+	// UseFsync 是否使用 fsync（conv=fsync）
+	UseFsync bool
 }
 
 // NewDiskChecker 创建新的磁盘检查器
@@ -94,9 +98,11 @@ func NewDiskChecker(blockSizeKB int, fileSize uint64, verbose bool, randBlockSiz
 	return &DiskChecker{
 		BlockSize:     blockSizeKB,
 		FileSize:      fileSize,
-		Iterations:    1, // 仅测试一次
+		Iterations:    1,           // 仅测试一次
 		Verbose:       verbose,
 		RandBlockSize: randBlockSizeKB,
+		UseDirectIO:   true,        // 默认使用直接 IO
+		UseFsync:      true,        // 默认使用 fsync
 	}
 }
 
@@ -140,12 +146,6 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 		count = 1
 	}
 
-	// 单次测试
-	var writeTime float64
-	var readTime float64
-	var writeBytes, readBytes uint64
-	var err error
-
 	// 生成测试文件名
 	testFile := filepath.Join(dir, fmt.Sprintf("dd_test_%d", time.Now().UnixNano()))
 
@@ -168,30 +168,72 @@ func (dc *DiskChecker) Run(dir string) (*DiskResult, error) {
 		}
 	}()
 
-	// 执行写入测试
-	writeBytes, writeTime, err = dc.runWriteTest(testFile, ioBlockSize, count)
-	if err == nil {
-		// 清空缓存，确保读取测试准确
-		dc.dropCaches()
+	// 多次迭代测试，取平均值
+	var writeTimes []float64
+	var readTimes []float64
+	var writeBytesList []uint64
+	var readBytesList []uint64
 
-		// 执行读取测试
-		readBytes, readTime, err = dc.runReadTest(testFile, ioBlockSize)
+	for iter := 0; iter < dc.Iterations; iter++ {
+		if dc.Verbose && dc.Iterations > 1 {
+			fmt.Printf("磁盘测试迭代 %d/%d\n", iter+1, dc.Iterations)
+		}
+
+		// 每次迭代重新创建测试文件
+		currentTestFile := testFile
+		if dc.Iterations > 1 {
+			currentTestFile = fmt.Sprintf("%s_%d", testFile, iter)
+		}
+
+		// 执行写入测试
+		writeBytes, writeTime, err := dc.runWriteTest(currentTestFile, ioBlockSize, count)
+		if err == nil {
+			writeTimes = append(writeTimes, writeTime)
+			writeBytesList = append(writeBytesList, writeBytes)
+
+			// 清空缓存，确保读取测试准确
+			dc.dropCaches()
+
+			// 执行读取测试
+			readBytes, readTime, err := dc.runReadTest(currentTestFile, ioBlockSize)
+			if err == nil {
+				readTimes = append(readTimes, readTime)
+				readBytesList = append(readBytesList, readBytes)
+			}
+
+			// 清理测试文件
+			os.Remove(currentTestFile)
+		}
 	}
 
-	// 设置顺序读写结果
-	if err == nil || writeTime > 0 {
-		result.WriteTime = writeTime
-		result.WriteBytes = writeBytes
-		result.WriteBandwidth = float64(writeBytes) / writeTime / (1024 * 1024)
+	// 计算平均值
+	var avgWriteTime, avgReadTime float64
+	var avgWriteBytes, avgReadBytes uint64
+
+	if len(writeTimes) > 0 {
+		avgWriteTime = utils.Average(writeTimes)
+		avgWriteBytes = uint64(utils.AverageUint64(writeBytesList))
+	}
+	if len(readTimes) > 0 {
+		avgReadTime = utils.Average(readTimes)
+		avgReadBytes = uint64(utils.AverageUint64(readBytesList))
 	}
 
-	if readTime > 0 {
-		result.ReadTime = readTime
-		result.ReadBytes = readBytes
-		result.ReadBandwidth = float64(readBytes) / readTime / (1024 * 1024)
+	// 设置顺序读写结果（使用平均值）
+	result.WriteTime = avgWriteTime
+	result.WriteBytes = avgWriteBytes
+	if avgWriteTime > 0 {
+		result.WriteBandwidth = float64(avgWriteBytes) / avgWriteTime / (1024 * 1024)
+	}
+
+	if avgReadTime > 0 {
+		result.ReadTime = avgReadTime
+		result.ReadBytes = avgReadBytes
+		result.ReadBandwidth = float64(avgReadBytes) / avgReadTime / (1024 * 1024)
 	}
 
 	// 执行随机读写测试
+	var err error
 	result.RandWriteBytes, result.RandWriteTime, result.RandReadBytes, result.RandReadTime, err = dc.runRandomTest(testFile)
 	if err == nil && dc.Verbose {
 		fmt.Printf("随机读写测试完成\n")
@@ -696,17 +738,38 @@ func (dc *DiskChecker) RunRemoteWithAuth(hostname, username, password string, po
 
 // runWriteTest 执行单次写入测试
 func (dc *DiskChecker) runWriteTest(testFile string, blockSize int, count int) (uint64, float64, error) {
-	// 使用更严谨的参数：fsync 确保数据真正写入磁盘
-	writeCmd := exec.Command("dd", "if=/dev/zero", fmt.Sprintf("of=%s", testFile),
-		fmt.Sprintf("bs=%d", blockSize), fmt.Sprintf("count=%d", count),
-		"oflag=direct", "conv=fsync")
+	// 构建 dd 命令参数
+	ddArgs := []string{
+		"if=/dev/zero",
+		fmt.Sprintf("of=%s", testFile),
+		fmt.Sprintf("bs=%d", blockSize),
+		fmt.Sprintf("count=%d", count),
+	}
+	
+	// 根据配置添加可选参数
+	if dc.UseDirectIO {
+		ddArgs = append(ddArgs, "oflag=direct")
+	}
+	if dc.UseFsync {
+		ddArgs = append(ddArgs, "conv=fsync")
+	}
+
+	writeCmd := exec.Command("dd", ddArgs...)
 	var writeErr bytes.Buffer
 	writeCmd.Stderr = &writeErr
 
 	if err := writeCmd.Run(); err != nil {
 		// 尝试降级参数（不使用 oflag=direct）
-		writeCmd = exec.Command("dd", "if=/dev/zero", fmt.Sprintf("of=%s", testFile),
-			fmt.Sprintf("bs=%d", blockSize), fmt.Sprintf("count=%d", count), "conv=fsync")
+		ddArgsFallback := []string{
+			"if=/dev/zero",
+			fmt.Sprintf("of=%s", testFile),
+			fmt.Sprintf("bs=%d", blockSize),
+			fmt.Sprintf("count=%d", count),
+		}
+		if dc.UseFsync {
+			ddArgsFallback = append(ddArgsFallback, "conv=fsync")
+		}
+		writeCmd = exec.Command("dd", ddArgsFallback...)
 		writeCmd.Stderr = &writeErr
 		if err := writeCmd.Run(); err != nil {
 			// 再次尝试最基本的参数

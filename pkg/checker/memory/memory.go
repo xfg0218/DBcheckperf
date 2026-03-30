@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"dbcheckperf/pkg/checker/common"
 	"dbcheckperf/pkg/utils"
@@ -51,40 +52,84 @@ func NewStreamChecker(verbose bool) *StreamChecker {
 // Run 执行内存带宽测试
 // 使用 STREAM 基准测试方法，实际执行内存操作测试
 func (sc *StreamChecker) Run() (*StreamResult, error) {
-	// 尝试运行 STREAM 程序
+	// 1. 尝试运行 STREAM 程序（原生编译版本，性能最佳）
 	streamPath, err := exec.LookPath("stream")
 	if err == nil {
+		if sc.Verbose {
+			fmt.Printf("DEBUG: 使用原生 STREAM 程序：%s\n", streamPath)
+		}
 		cmd := exec.Command(streamPath)
 		output, err := cmd.Output()
 		if err == nil {
-			return sc.parseStreamOutput(string(output))
+			result, err := sc.parseStreamOutput(string(output))
+			if err == nil && result.TotalBandwidth > 0 {
+				return result, nil
+			}
 		}
 	}
 
-	// 如果 STREAM 不可用，使用 Go 实现的内存带宽测试
+	// 2. 尝试运行 stream_mpi 或 stream-omp（MPI/OpenMP 版本）
+	for _, streamCmd := range []string{"stream_mpi", "stream-omp"} {
+		streamPath, err = exec.LookPath(streamCmd)
+		if err == nil {
+			if sc.Verbose {
+				fmt.Printf("DEBUG: 使用 %s 程序：%s\n", streamCmd, streamPath)
+			}
+			cmd := exec.Command(streamPath)
+			output, err := cmd.Output()
+			if err == nil {
+				result, err := sc.parseStreamOutput(string(output))
+				if err == nil && result.TotalBandwidth > 0 {
+					return result, nil
+				}
+			}
+			break
+		}
+	}
+
+	// 3. 使用优化的 Go 实现（使用 unsafe 包和内存对齐）
+	if sc.Verbose {
+		fmt.Println("DEBUG: STREAM 程序不可用，使用优化的 Go 实现")
+	}
 	return sc.runMemoryBandwidthTest()
 }
 
 // runMemoryBandwidthTest 运行内存带宽测试（Go 实现）
+// 使用 unsafe 包和内存对齐优化性能
 func (sc *StreamChecker) runMemoryBandwidthTest() (*StreamResult, error) {
 	result := &StreamResult{
 		Host: common.GetHostname(),
 	}
 
 	if sc.Verbose {
-		fmt.Printf("内存带宽测试：数组大小 %d 元素，迭代 %d 次\n", sc.ArraySize, sc.Iterations)
+		fmt.Printf("内存带宽测试：数组大小 %d 元素（约 %d MB），迭代 %d 次\n",
+			sc.ArraySize, sc.ArraySize*8/1024/1024, sc.Iterations)
 	}
 
-	// 分配测试数组
-	a := make([]float64, sc.ArraySize)
-	b := make([]float64, sc.ArraySize)
-	c := make([]float64, sc.ArraySize)
+	// 使用 unsafe 包分配内存，确保内存对齐
+	// 每个数组需要 8 字节对齐，因此分配 3 个连续的大数组
+	totalSize := sc.ArraySize * 8 * 3 // 3 个数组，每个 float64 占 8 字节
+	rawMemory := make([]byte, totalSize+63) // 额外 64 字节用于对齐
+
+	// 获取对齐的指针（64 字节对齐，优化 CPU 缓存行）
+	basePtr := unsafe.Pointer(&rawMemory[0])
+	alignedPtr := unsafe.Pointer(uintptr(basePtr) &^ uintptr(63))
+
+	// 将内存分割为 3 个数组
+	a := unsafe.Slice((*float64)(alignedPtr), sc.ArraySize)
+	b := unsafe.Slice((*float64)(unsafe.Pointer(uintptr(alignedPtr) + uintptr(sc.ArraySize*8))), sc.ArraySize)
+	c := unsafe.Slice((*float64)(unsafe.Pointer(uintptr(alignedPtr) + uintptr(sc.ArraySize*8*2))), sc.ArraySize)
 
 	// 初始化数据
 	for i := 0; i < sc.ArraySize; i++ {
 		a[i] = 1.0
 		b[i] = 2.0
 		c[i] = 0.0
+	}
+
+	// 预热：先运行一次让 CPU 缓存热起来
+	for i := 0; i < sc.ArraySize; i++ {
+		a[i] = b[i]
 	}
 
 	// 1. Copy 测试：a[i] = b[i]

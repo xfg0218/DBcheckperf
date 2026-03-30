@@ -93,6 +93,12 @@ type Config struct {
 	SSHAuthFile string
 	// SSHAuthMap 主机认证信息映射（从 SSHAuthFile 解析）
 	SSHAuthMap map[string]SSHAuthInfo
+	// Iterations 测试迭代次数（取平均值）
+	Iterations int
+	// UseDirectIO 是否使用直接 IO（oflag=direct）
+	UseDirectIO bool
+	// UseFsync 是否使用 fsync（conv=fsync）
+	UseFsync bool
 }
 
 // DefaultConfig 返回默认配置
@@ -106,6 +112,9 @@ func DefaultConfig() *Config {
 		RandBlockSize:    0,        // 随机读写使用 -B 参数指定的块大小
 		LatencyBlockSize: 4,        // 延迟测试默认 4KB
 		IOStatInterval:   "1s",     // IO 统计默认 1 秒间隔
+		Iterations:       1,        // 默认测试 1 次
+		UseDirectIO:      true,     // 默认使用直接 IO
+		UseFsync:         true,     // 默认使用 fsync
 	}
 }
 

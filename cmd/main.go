@@ -127,12 +127,18 @@ func main() {
 					if isLocal {
 						// 本地主机，直接运行
 						diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
+						diskChecker.Iterations = cfg.Iterations
+						diskChecker.UseDirectIO = cfg.UseDirectIO
+						diskChecker.UseFsync = cfg.UseFsync
 						result, err = diskChecker.Run(dir)
 						// 本地测试结果也使用 IP 地址
 						result.Host = checker.ResolveToIP(result.Host)
 					} else {
 						// 远程主机，通过 SSH 运行
 						diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
+						diskChecker.Iterations = cfg.Iterations
+						diskChecker.UseDirectIO = cfg.UseDirectIO
+						diskChecker.UseFsync = cfg.UseFsync
 						// 如果指定了 SSH 认证文件，使用密码认证
 						if cfg.SSHAuthMap != nil {
 							if authInfo, ok := cfg.SSHAuthMap[host]; ok {
@@ -157,6 +163,9 @@ func main() {
 			// 单机模式：仅在本机执行测试
 			// 创建磁盘检查器
 			diskChecker := checker.NewDiskChecker(cfg.BlockSize, fileSize, cfg.Verbose, cfg.RandBlockSize)
+			diskChecker.Iterations = cfg.Iterations
+			diskChecker.UseDirectIO = cfg.UseDirectIO
+			diskChecker.UseFsync = cfg.UseFsync
 
 			// 对每个测试目录运行测试
 			for _, dir := range cfg.TestDirs {
@@ -434,6 +443,9 @@ func parseFlags() *config.Config {
 	flag.StringVar(&cfg.NetQualityTarget, "net-quality-target", "", "网络质量测试目标主机")
 	flag.StringVar(&cfg.ReportFormat, "report", "", "报告格式：html,json,table（默认 table）")
 	flag.StringVar(&cfg.ReportOutput, "output", "", "报告输出文件路径（默认当前目录）")
+	flag.IntVar(&cfg.Iterations, "iterations", 1, "测试迭代次数（取平均值）")
+	flag.BoolVar(&cfg.UseDirectIO, "direct-io", true, "使用直接 IO（oflag=direct），默认开启")
+	flag.BoolVar(&cfg.UseFsync, "fsync", true, "使用 fsync 确保数据写入磁盘（conv=fsync），默认开启")
 
 	// 多值参数处理
 	var hosts multiStringFlag

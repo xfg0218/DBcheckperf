@@ -192,6 +192,18 @@ func Average(values []float64) float64 {
 	return sum / float64(len(values))
 }
 
+// AverageUint64 计算 uint64 切片的平均值
+func AverageUint64(values []uint64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	var sum uint64
+	for _, v := range values {
+		sum += v
+	}
+	return float64(sum) / float64(len(values))
+}
+
 // Median 计算 float64 切片的中位数
 func Median(values []float64) float64 {
 	if len(values) == 0 {
