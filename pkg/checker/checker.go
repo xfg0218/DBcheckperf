@@ -176,6 +176,10 @@ type DiskInfo struct {
 	Type string
 	// Rotational 是否旋转磁盘（HDD=true）
 	Rotational bool
+	// BlockSize 块大小（字节）
+	BlockSize int
+	// Scheduler 调度算法
+	Scheduler string
 }
 
 // RAIDConfigInfo RAID 配置详细信息
@@ -742,6 +746,8 @@ func (hc *HardwareChecker) getSingleDiskInfo(name string) *DiskInfo {
 		Vendor:     "Unknown",
 		Type:       "Unknown",
 		Rotational: true,
+		BlockSize:  512,       // 默认块大小
+		Scheduler:  "unknown", // 默认调度器
 	}
 
 	// 获取磁盘大小
@@ -767,6 +773,35 @@ func (hc *HardwareChecker) getSingleDiskInfo(name string) *DiskInfo {
 			}
 		} else {
 			diskInfo.Type = "HDD"
+		}
+	}
+
+	// 获取块大小（logical_block_size）
+	blockSizePath := fmt.Sprintf("/sys/block/%s/queue/logical_block_size", name)
+	data, err = os.ReadFile(blockSizePath)
+	if err == nil {
+		blockSize, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+		if blockSize > 0 {
+			diskInfo.BlockSize = blockSize
+		}
+	}
+
+	// 获取调度算法
+	schedulerPath := fmt.Sprintf("/sys/block/%s/queue/scheduler", name)
+	data, err = os.ReadFile(schedulerPath)
+	if err == nil {
+		scheduler := strings.TrimSpace(string(data))
+		// 调度器格式示例："[mq-deadline] kyber bfq none"
+		// 方括号包围的是当前启用的调度器
+		if strings.Contains(scheduler, "[") && strings.Contains(scheduler, "]") {
+			// 提取当前启用的调度器
+			start := strings.Index(scheduler, "[")
+			end := strings.Index(scheduler, "]")
+			if start < end {
+				diskInfo.Scheduler = scheduler[start+1 : end]
+			}
+		} else {
+			diskInfo.Scheduler = scheduler
 		}
 	}
 

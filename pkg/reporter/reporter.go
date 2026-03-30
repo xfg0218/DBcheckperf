@@ -753,6 +753,8 @@ func (r *Reporter) PrintHardwareResults(infos []*checker.RemoteHardwareInfo) {
 				fmt.Printf("  类型：     %s\n", disk.Type)
 				fmt.Printf("  大小：     %s\n", utils.FormatBytes(disk.Size))
 				fmt.Printf("  旋转磁盘： %s\n", rotational)
+				fmt.Printf("  块大小：   %d 字节\n", disk.BlockSize)
+				fmt.Printf("  调度算法： %s\n", disk.Scheduler)
 			}
 		}
 		fmt.Println()

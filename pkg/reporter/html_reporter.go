@@ -404,12 +404,12 @@ func (hr *HTMLReporter) generateHardwareInfoSection(hardwareInfos []*checker.Har
 		if len(hw.DiskInfos) > 0 {
 			sb.WriteString(`<h4>磁盘信息</h4>`)
 			sb.WriteString(`<table>`)
-			sb.WriteString(`<thead><tr><th>设备</th><th>型号</th><th>类型</th><th>容量</th><th>文件系统</th></tr></thead>`)
+			sb.WriteString(`<thead><tr><th>设备</th><th>型号</th><th>类型</th><th>容量</th><th>块大小</th><th>调度算法</th></tr></thead>`)
 			sb.WriteString(`<tbody>`)
 			for _, disk := range hw.DiskInfos {
 				sb.WriteString(`<tr>`)
-				sb.WriteString(fmt.Sprintf(`<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>`,
-					disk.Name, disk.Model, disk.Type, formatBytes(disk.Size), "-"))
+				sb.WriteString(fmt.Sprintf(`<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d 字节</td><td>%s</td>`,
+					disk.Name, disk.Model, disk.Type, formatBytes(disk.Size), disk.BlockSize, disk.Scheduler))
 				sb.WriteString(`</tr>`)
 			}
 			sb.WriteString(`</tbody>`)
