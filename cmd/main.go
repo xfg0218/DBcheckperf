@@ -651,6 +651,11 @@ func printUsage() {
   --latency-bs <KB>   延迟和 IOPS 测试块大小 (KB)，默认 4KB
   --iostat-interval   IO 统计采样间隔 (如 1s, 5s)，默认 1s
   --net-quality-target 网络质量测试目标主机
+  --iterations <N>    测试迭代次数（取平均值），默认 1 次
+  --direct-io         使用直接 IO（oflag=direct），默认开启
+  --no-direct-io      禁用直接 IO
+  --fsync             使用 fsync（conv=fsync），默认开启
+  --no-fsync          禁用 fsync
   --version           显示版本号
   -?                  显示帮助信息
 
