@@ -330,7 +330,7 @@ func (hr *HTMLReporter) generateSystemInfoSection(systemInfos []*checker.SystemI
 	sb.WriteString(`<thead>`)
 	sb.WriteString(`<tr>`)
 	sb.WriteString(`<th>主机名</th><th>虚拟化</th><th>CPU 型号</th><th>核心数</th>`)
-	sb.WriteString(`<th>内存大小</th><th>操作系统</th><th>内核版本</th><th>网卡速率</th>`)
+	sb.WriteString(`<th>内存大小</th><th>磁盘大小</th><th>服务器厂家</th><th>操作系统</th><th>内核版本</th><th>网卡速率</th>`)
 	sb.WriteString(`</tr>`)
 	sb.WriteString(`</thead>`)
 	sb.WriteString(`<tbody>`)
@@ -342,6 +342,8 @@ func (hr *HTMLReporter) generateSystemInfoSection(systemInfos []*checker.SystemI
 		sb.WriteString(fmt.Sprintf(`<td>%s</td>`, info.CPUModel))
 		sb.WriteString(fmt.Sprintf(`<td>%d</td>`, info.CPUCore))
 		sb.WriteString(fmt.Sprintf(`<td>%s</td>`, formatBytes(info.TotalRAM)))
+		sb.WriteString(fmt.Sprintf(`<td>%s</td>`, formatBytes(info.DiskSize)))
+		sb.WriteString(fmt.Sprintf(`<td>%s</td>`, "未知")) // 服务器厂家（需要额外传递）
 		sb.WriteString(fmt.Sprintf(`<td>%s</td>`, info.OSName))
 		sb.WriteString(fmt.Sprintf(`<td>%s</td>`, info.KernelVersion))
 		sb.WriteString(fmt.Sprintf(`<td>%d Mbps</td>`, info.NICSpeed))
@@ -364,6 +366,29 @@ func (hr *HTMLReporter) generateHardwareInfoSection(hardwareInfos []*checker.Har
 
 	for i, hw := range hardwareInfos {
 		sb.WriteString(fmt.Sprintf(`<h3>主机 %d: %s</h3>`, i+1, hw.Host))
+
+		// OS 信息 - 新增
+		sb.WriteString(`<div class="metric-card">`)
+		sb.WriteString(`<h4>OS 信息</h4>`)
+		osType := hw.OSType
+		if osType == "" {
+			osType = "未知"
+		}
+		serverVendor := hw.ServerVendor
+		if serverVendor == "" {
+			serverVendor = "未知"
+		}
+		serverModel := hw.ServerModel
+		if serverModel == "" {
+			serverModel = "未知"
+		}
+		architecture := hw.Architecture
+		if architecture == "" {
+			architecture = "未知"
+		}
+		sb.WriteString(fmt.Sprintf(`<p>OS 类型：%s | 服务器厂家：%s | 服务器型号：%s | 架构：%s</p>`,
+			osType, serverVendor, serverModel, architecture))
+		sb.WriteString(`</div>`)
 
 		// CPU 信息
 		if hw.CPUInfo != nil {
@@ -423,7 +448,7 @@ func (hr *HTMLReporter) generateDiskResultsSection(diskResults []*checker.DiskRe
 	sb.WriteString(`<thead>`)
 	sb.WriteString(`<tr>`)
 	sb.WriteString(`<th>主机</th><th>测试目录</th><th>写入带宽</th><th>读取带宽</th>`)
-	sb.WriteString(`<th>随机写入</th><th>随机读取</th><th>块大小</th>`)
+	sb.WriteString(`<th>随机写入</th><th>随机读取</th><th>块大小</th><th>测试时间</th>`)
 	sb.WriteString(`</tr>`)
 	sb.WriteString(`</thead>`)
 	sb.WriteString(`<tbody>`)
@@ -437,6 +462,7 @@ func (hr *HTMLReporter) generateDiskResultsSection(diskResults []*checker.DiskRe
 		sb.WriteString(fmt.Sprintf(`<td>%.2f MB/s</td>`, result.RandWriteBandwidth))
 		sb.WriteString(fmt.Sprintf(`<td>%.2f MB/s</td>`, result.RandReadBandwidth))
 		sb.WriteString(fmt.Sprintf(`<td>%d KB</td>`, result.BlockSize/1024))
+		sb.WriteString(fmt.Sprintf(`<td>%.2f s</td>`, result.WriteTime))
 		sb.WriteString(`</tr>`)
 	}
 
@@ -461,6 +487,9 @@ func (hr *HTMLReporter) generateStreamResultsSection(streamResults []*checker.St
 	sb.WriteString(`</thead>`)
 	sb.WriteString(`<tbody>`)
 
+	// 计算汇总统计
+	var totalCopy, totalScale, totalAdd, totalTriad, totalSum float64
+
 	for _, result := range streamResults {
 		sb.WriteString(`<tr>`)
 		sb.WriteString(fmt.Sprintf(`<td>%s</td>`, result.Host))
@@ -470,6 +499,27 @@ func (hr *HTMLReporter) generateStreamResultsSection(streamResults []*checker.St
 		sb.WriteString(fmt.Sprintf(`<td>%.2f MB/s</td>`, result.TriadBandwidth))
 		sb.WriteString(fmt.Sprintf(`<td class="status-good">%.2f MB/s</td>`, result.TotalBandwidth))
 		sb.WriteString(`</tr>`)
+
+		totalCopy += result.CopyBandwidth
+		totalScale += result.ScaleBandwidth
+		totalAdd += result.AddBandwidth
+		totalTriad += result.TriadBandwidth
+		totalSum += result.TotalBandwidth
+	}
+
+	// 添加汇总行
+	n := float64(len(streamResults))
+	if n > 0 {
+		sb.WriteString(`<tfoot>`)
+		sb.WriteString(`<tr style="font-weight: bold; background: #e9ecef;">`)
+		sb.WriteString(`<td>平均</td>`)
+		sb.WriteString(fmt.Sprintf(`<td>%.2f MB/s</td>`, totalCopy/n))
+		sb.WriteString(fmt.Sprintf(`<td>%.2f MB/s</td>`, totalScale/n))
+		sb.WriteString(fmt.Sprintf(`<td>%.2f MB/s</td>`, totalAdd/n))
+		sb.WriteString(fmt.Sprintf(`<td>%.2f MB/s</td>`, totalTriad/n))
+		sb.WriteString(fmt.Sprintf(`<td class="status-good">%.2f MB/s</td>`, totalSum/n))
+		sb.WriteString(`</tr>`)
+		sb.WriteString(`</tfoot>`)
 	}
 
 	sb.WriteString(`</tbody>`)

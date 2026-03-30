@@ -111,17 +111,66 @@ func DefaultConfig() *Config {
 
 // Validate 验证配置是否有效
 func (c *Config) Validate() error {
+	// 纯本地测试类型（不需要 -d 和 -h/-f/-F）
+	// s=内存带宽，i=IO 统计，u=NUMA, k=内核参数，q=网络质量，H=硬件信息
+	localOnlyTypes := []TestType{TestStream, TestIOStat, TestNUMA, TestKernel, TestNetQuality, TestHardware}
+	
+	// 检查是否仅包含纯本地测试类型
+	isLocalOnly := true
+	for _, t := range c.TestTypes {
+		found := false
+		for _, localType := range localOnlyTypes {
+			if t == localType {
+				found = true
+				break
+			}
+		}
+		if !found {
+			isLocalOnly = false
+			break
+		}
+	}
+	
+	// 如果仅包含纯本地测试类型，不需要验证主机和目录
+	if isLocalOnly && len(c.TestTypes) > 0 {
+		return nil
+	}
+
 	// 硬件信息收集模式不需要测试目录和主机
 	if hasTestType(c.TestTypes, TestHardware) && len(c.TestTypes) == 1 {
 		return nil
 	}
 
-	if len(c.Hosts) == 0 && c.HostFile == "" {
-		return ErrNoHostsSpecified
+	// 网络测试（n/N/M）需要主机和临时目录
+	networkTypes := []TestType{TestNetworkSerial, TestNetworkParallel, TestNetworkMatrix}
+	hasNetwork := false
+	for _, t := range c.TestTypes {
+		for _, nt := range networkTypes {
+			if t == nt {
+				hasNetwork = true
+				break
+			}
+		}
+		if hasNetwork {
+			break
+		}
 	}
+
+	if hasNetwork {
+		if len(c.Hosts) == 0 && c.HostFile == "" {
+			return ErrNoHostsSpecified
+		}
+		if len(c.TestDirs) == 0 {
+			return ErrNoTestDirsSpecified
+		}
+		return nil
+	}
+
+	// 其他测试类型（d, l, I）需要测试目录，但主机可选（默认本机）
 	if len(c.TestDirs) == 0 {
 		return ErrNoTestDirsSpecified
 	}
+
 	return nil
 }
 

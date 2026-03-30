@@ -134,12 +134,12 @@ func TestValidate_HardwareWithOtherTypes(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name: "硬件 + 磁盘测试，无主机",
+			name: "硬件 + 磁盘测试，无主机（默认本机）",
 			config: &Config{
 				TestTypes: []TestType{TestHardware, TestDisk},
 				TestDirs:  []string{tmpDir},
 			},
-			expectErr: true,
+			expectErr: false, // 现在允许无主机，默认使用本机
 		},
 		{
 			name: "硬件 + 磁盘测试，无目录",
@@ -167,6 +167,7 @@ func TestValidate_HardwareWithOtherTypes(t *testing.T) {
 func TestValidate_NoHosts(t *testing.T) {
 	tmpDir := t.TempDir()
 
+	// 测试 1：磁盘测试允许无主机（默认本机）
 	config := &Config{
 		Hosts:    []string{},
 		HostFile: "",
@@ -175,8 +176,21 @@ func TestValidate_NoHosts(t *testing.T) {
 	}
 
 	err := config.Validate()
+	if err != nil {
+		t.Errorf("Validate() 磁盘测试允许无主机（默认本机）; 得到：%v", err)
+	}
+
+	// 测试 2：网络测试需要主机
+	configNetwork := &Config{
+		Hosts:    []string{},
+		HostFile: "",
+		TestDirs: []string{tmpDir},
+		TestTypes: []TestType{TestNetworkSerial},
+	}
+
+	err = configNetwork.Validate()
 	if err != ErrNoHostsSpecified {
-		t.Errorf("Validate() 应该返回 ErrNoHostsSpecified; 得到：%v", err)
+		t.Errorf("Validate() 网络测试应该返回 ErrNoHostsSpecified; 得到：%v", err)
 	}
 }
 
@@ -244,7 +258,7 @@ func TestValidate_MultipleHosts(t *testing.T) {
 		{"多个主机", []string{"localhost", "host2", "host3"}, false},
 		{"带端口的主机", []string{"localhost:22", "host2:2222"}, false},
 		{"带用户的主机", []string{"user@localhost", "admin@host2"}, false},
-		{"空主机列表", []string{}, true},
+		{"空主机列表（磁盘测试默认本机）", []string{}, false}, // 现在允许空主机列表，默认使用本机
 	}
 
 	for _, tt := range tests {

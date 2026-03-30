@@ -489,6 +489,25 @@ func parseFlags() *config.Config {
 	// 解析测试类型
 	cfg.TestTypes = parseTestTypes(testTypesStr)
 
+	// 自动添加 localhost 到主机列表（如果未指定主机且测试类型允许）
+	// 网络测试（n/N/M）需要明确指定主机，不自动添加
+	hasNetwork := false
+	for _, t := range cfg.TestTypes {
+		if t == config.TestNetworkSerial || t == config.TestNetworkParallel || t == config.TestNetworkMatrix {
+			hasNetwork = true
+			break
+		}
+	}
+	
+	if !hasNetwork && len(cfg.Hosts) == 0 && cfg.HostFile == "" && cfg.SSHAuthFile == "" {
+		// 获取本地主机名
+		localHost, _ := os.Hostname()
+		if localHost == "" {
+			localHost = "localhost"
+		}
+		cfg.Hosts = append(cfg.Hosts, localHost)
+	}
+
 	// 解析持续时间
 	if d, err := time.ParseDuration(durationStr); err == nil {
 		cfg.Duration = d
@@ -810,13 +829,38 @@ func generateHTMLReport(
 ) error {
 	htmlRep := reporter.NewHTMLReporter(cfg.ReportOutput, cfg.Verbose)
 
+	// 收集硬件信息（用于 HTML 报告）
+	var hardwareInfos []*checker.HardwareInfo
+	hardwareChecker := checker.NewHardwareChecker(cfg.Verbose)
+	
+	// 对每个测试目录收集硬件信息（单机模式）
+	for _, dir := range cfg.TestDirs {
+		_ = dir // 目录用于磁盘测试，但硬件信息收集不需要
+		hardwareInfo, err := hardwareChecker.Run()
+		if err != nil {
+			if cfg.Verbose {
+				fmt.Printf("警告：硬件信息收集失败：%v\n", err)
+			}
+			continue
+		}
+		hardwareInfos = append(hardwareInfos, hardwareInfo)
+	}
+
+	// 如果没有收集到硬件信息，创建一个默认的
+	if len(hardwareInfos) == 0 {
+		hardwareInfo, err := hardwareChecker.Run()
+		if err == nil {
+			hardwareInfos = append(hardwareInfos, hardwareInfo)
+		}
+	}
+
 	if err := htmlRep.GenerateReport(
 		systemInfos,
 		diskResults,
 		streamResults,
 		networkResults,
 		latencyResults,
-		nil, // hardwareInfos
+		hardwareInfos,
 	); err != nil {
 		return err
 	}

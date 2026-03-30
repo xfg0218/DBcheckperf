@@ -112,6 +112,14 @@ type HardwareInfo struct {
 	NICInfos []*NICInfo
 	// MemoryInfo 内存信息
 	MemoryInfo *MemoryInfo
+	// OSType OS 类型（物理机/虚拟机/超融合）
+	OSType string
+	// ServerVendor 服务器厂家
+	ServerVendor string
+	// ServerModel 服务器型号
+	ServerModel string
+	// Architecture 架构（x86_64/aarch64）
+	Architecture string
 }
 
 // RemoteHardwareInfo 远程主机硬件信息
@@ -325,8 +333,20 @@ func (hc *HardwareChecker) Run() (*HardwareInfo, error) {
 		Host: common.GetHostname(),
 	}
 
-	// 检测是否为虚拟机
-	isVirtual := hc.isVirtualMachine()
+	// 获取平台信息（OS 类型、服务器厂家、架构等）
+	platformInfo := common.GetServerPlatformInfo()
+	info.OSType = platformInfo.OSType
+	info.ServerVendor = platformInfo.ServerVendor
+	info.ServerModel = platformInfo.ServerModel
+	info.Architecture = platformInfo.Architecture
+
+	if hc.Verbose {
+		fmt.Printf("DEBUG: 平台信息 - OS 类型：%s, 服务器厂家：%s, 架构：%s\n",
+			info.OSType, info.ServerVendor, info.Architecture)
+	}
+
+	// 检测是否为虚拟机（使用平台检测的结果）
+	isVirtual := (info.OSType == "虚拟机")
 
 	if hc.Verbose {
 		if isVirtual {

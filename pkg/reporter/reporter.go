@@ -677,6 +677,32 @@ func (r *Reporter) PrintHardwareResults(infos []*checker.RemoteHardwareInfo) {
 		fmt.Printf("  睿频：       %s\n", turboFreqStr)
 		fmt.Println()
 
+		// OS 信息（竖行展示）- 新增
+		fmt.Println("--- OS 信息 ---")
+		fmt.Println()
+		osType := info.OSType
+		if osType == "" {
+			osType = "未知"
+		}
+		serverVendor := info.ServerVendor
+		if serverVendor == "" {
+			serverVendor = "未知"
+		}
+		serverModel := info.ServerModel
+		if serverModel == "" {
+			serverModel = "未知"
+		}
+		architecture := info.Architecture
+		if architecture == "" {
+			architecture = "未知"
+		}
+
+		fmt.Printf("  OS 类型：     %s\n", osType)
+		fmt.Printf("  服务器厂家： %s\n", serverVendor)
+		fmt.Printf("  服务器型号： %s\n", serverModel)
+		fmt.Printf("  架构：       %s\n", architecture)
+		fmt.Println()
+
 		// 内存信息（竖行展示）
 		fmt.Println("--- 内存信息 ---")
 		fmt.Println()
