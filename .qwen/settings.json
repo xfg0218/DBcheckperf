@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(gh *)",
+      "Bash(git checkout *)",
+      "Bash(rm *)",
+      "Bash(cat)",
+      "Bash(// *)",
+      "Bash(func *)",
+      "Bash(cfg *)",
+      "Bash(systeminfos *)",
+      "Bash(hardwareinfos *)",
+      "Bash(diskresults *)",
+      "Bash(streamresults *)",
+      "Bash(networkresults *)",
+      "Bash(latencyresults *)",
+      "Bash(error *)",
+      "Bash(htmlrep *)",
+      "Bash(cfg.reportoutput, *)",
+      "Bash(networkresultptrs *)",
+      "Bash(*checker.networkresult,)",
+      "Bash(:= *)",
+      "Bash(})",
+      "Bash(systeminfos,)",
+      "Bash(diskresults,)",
+      "Bash(streamresults,)",
+      "Bash(networkresultptrs,)",
+      "Bash(latencyresults,)",
+      "Bash(hardwareinfos,)",
+      "Bash(err *)",
+      "Bash(return *)",
+      "Bash(fmt.printf)",
+      "Bash(eof)",
+      "Bash(sed *)",
+      "Bash(mv *)",
+      "Bash(npx *)"
+    ]
+  },
+  "$version": 3
+}
