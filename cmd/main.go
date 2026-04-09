@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -12,16 +13,19 @@ import (
 	"time"
 
 	"dbcheckperf/config"
+	"dbcheckperf/pkg/advisor"
 	"dbcheckperf/pkg/checker"
 	"dbcheckperf/pkg/checker/common"
 	"dbcheckperf/pkg/checker/disk"
 	"dbcheckperf/pkg/checker/network"
+	"dbcheckperf/pkg/history"
+	"dbcheckperf/pkg/progress"
 	"dbcheckperf/pkg/reporter"
 	"dbcheckperf/pkg/utils"
 )
 
 // 版本号
-const Version = "1.6.3"
+const Version = "1.7.0"
 
 func main() {
 	// 解析命令行参数
@@ -407,10 +411,81 @@ func main() {
 		rep.PrintSummary(diskResults, streamResults, networkResults)
 	}
 
+	// ===== Phase 1 集成功能 =====
+
+	// 1. 智能告警与优化建议（advisor 集成）
+	hasAnyResult := len(diskResults) > 0 || len(streamResults) > 0 || len(networkResults) > 0 || len(latencyResults) > 0
+	if hasAnyResult {
+		advisorInstance := advisor.NewAdvisor(cfg.Verbose)
+		analysisReport := advisorInstance.AnalyzeResults(diskResults, streamResults, networkResults, latencyResults)
+		fmt.Println(advisorInstance.FormatReport(analysisReport))
+	}
+
+	// 2. 历史数据自动保存
+	if hasAnyResult && !cfg.NoSave {
+		hm := history.NewHistoryManager("", cfg.Verbose)
+		hostname := common.GetHostname()
+		if systemInfo != nil {
+			hostname = systemInfo.Host
+		}
+		testTypeStr := cfg.TestTypesString()
+		record := hm.CreateRecordFromResults(
+			hostname,
+			testTypeStr,
+			diskResults,
+			streamResults,
+			networkResults,
+			latencyResults,
+			[]string{"auto"},
+			"",
+		)
+		if err := hm.SaveRecord(record); err != nil && cfg.Verbose {
+			fmt.Printf("警告：保存历史记录失败：%v\n", err)
+		}
+	}
+
+	// 3. 基线对比（--baseline 选项）
+	if hasAnyResult && cfg.Baseline {
+		hm := history.NewHistoryManager("", cfg.Verbose)
+		records, err := hm.GetRecentRecords(2) // 获取最近 2 条
+		if err == nil && len(records) >= 2 {
+			// 上一条记录是 records[1]（按时间倒序）
+			oldRecord := &records[1]
+			hostname := common.GetHostname()
+			if systemInfo != nil {
+				hostname = systemInfo.Host
+			}
+			testTypeStr := cfg.TestTypesString()
+			newRecord := hm.CreateRecordFromResults(
+				hostname,
+				testTypeStr,
+				diskResults,
+				streamResults,
+				networkResults,
+				latencyResults,
+				[]string{"baseline-compare"},
+				"",
+			)
+			comparison := hm.CompareRecords(oldRecord, newRecord)
+			printBaselineComparison(comparison)
+		} else if err == nil && len(records) < 2 {
+			fmt.Println("\nℹ️  基线对比：历史记录不足（需要至少 2 条），跳过对比")
+		} else if cfg.Verbose {
+			fmt.Printf("警告：基线对比失败：%v\n", err)
+		}
+	}
+
 	// 生成 HTML 报告（如果指定了）
 	if cfg.ReportFormat == "html" {
 		if err := generateHTMLReport(cfg, allSystemInfos, diskResults, streamResults, networkResults, latencyResults); err != nil {
 			rep.PrintError(fmt.Errorf("生成 HTML 报告失败：%v", err))
+		}
+	}
+
+	// 生成 JSON 报告（如果指定了）
+	if cfg.ReportFormat == "json" {
+		if err := generateJSONReport(cfg, allSystemInfos, diskResults, streamResults, networkResults, latencyResults); err != nil {
+			rep.PrintError(fmt.Errorf("生成 JSON 报告失败：%v", err))
 		}
 	}
 
@@ -446,6 +521,8 @@ func parseFlags() *config.Config {
 	flag.IntVar(&cfg.Iterations, "iterations", 1, "测试迭代次数（取平均值）")
 	flag.BoolVar(&cfg.UseDirectIO, "direct-io", true, "使用直接 IO（oflag=direct），默认开启")
 	flag.BoolVar(&cfg.UseFsync, "fsync", true, "使用 fsync 确保数据写入磁盘（conv=fsync），默认开启")
+	flag.BoolVar(&cfg.Baseline, "baseline", false, "自动与上次测试结果对比（基线对比）")
+	flag.BoolVar(&cfg.NoSave, "no-save", false, "禁用自动保存测试结果到历史记录")
 
 	// 多值参数处理
 	var hosts multiStringFlag
@@ -656,6 +733,8 @@ func printUsage() {
   --no-direct-io      禁用直接 IO
   --fsync             使用 fsync（conv=fsync），默认开启
   --no-fsync          禁用 fsync
+  --baseline          自动与上次测试结果对比（基线对比）
+  --no-save           禁用自动保存测试结果到历史记录
   --version           显示版本号
   -?                  显示帮助信息
 
@@ -884,4 +963,250 @@ func generateHTMLReport(
 
 	fmt.Printf("\n✅ HTML 报告已生成：%s\n", cfg.ReportOutput)
 	return nil
+}
+
+// printBaselineComparison 打印基线对比结果
+func printBaselineComparison(comparison *history.ComparisonResult) {
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Println("                    基线对比结果")
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Printf("上次测试：%s\n", comparison.OldTime.Format("2006-01-02 15:04:05"))
+	fmt.Printf("本次测试：%s\n", comparison.NewTime.Format("2006-01-02 15:04:05"))
+	fmt.Println("───────────────────────────────────────────────────────")
+
+	// 磁盘对比
+	if comparison.DiskComparison != nil {
+		d := comparison.DiskComparison
+		fmt.Println("\n📁 磁盘性能变化：")
+		if d.WritePercent != 0 {
+			emoji := "🟢"
+			if d.WritePercent < -10 {
+				emoji = "🔴"
+			} else if d.WritePercent < 0 {
+				emoji = "🟡"
+			}
+			fmt.Printf("  %s 写入带宽：%.1f MB/s (%.1f%%)\n", emoji, d.WriteChange, d.WritePercent)
+		}
+		if d.ReadPercent != 0 {
+			emoji := "🟢"
+			if d.ReadPercent < -10 {
+				emoji = "🔴"
+			} else if d.ReadPercent < 0 {
+				emoji = "🟡"
+			}
+			fmt.Printf("  %s 读取带宽：%.1f MB/s (%.1f%%)\n", emoji, d.ReadChange, d.ReadPercent)
+		}
+	}
+
+	// 内存对比
+	if comparison.MemoryComparison != nil {
+		m := comparison.MemoryComparison
+		emoji := "🟢"
+		if m.BandwidthPercent < -10 {
+			emoji = "🔴"
+		} else if m.BandwidthPercent < 0 {
+			emoji = "🟡"
+		}
+		fmt.Printf("\n🧠 内存带宽：%s %.1f MB/s (%.1f%%)\n", emoji, m.BandwidthChange, m.BandwidthPercent)
+	}
+
+	// 网络对比
+	if comparison.NetworkComparison != nil {
+		n := comparison.NetworkComparison
+		emoji := "🟢"
+		if n.BandwidthPercent < -10 {
+			emoji = "🔴"
+		} else if n.BandwidthPercent < 0 {
+			emoji = "🟡"
+		}
+		fmt.Printf("\n🌐 网络带宽：%s %.1f MB/s (%.1f%%)\n", emoji, n.BandwidthChange, n.BandwidthPercent)
+	}
+
+	// 延迟对比
+	if comparison.LatencyComparison != nil {
+		l := comparison.LatencyComparison
+		oldReadLat := getOldLatency(comparison)
+		oldWriteLat := getOldWriteLatency(comparison)
+		newReadLat := getNewLatency(comparison)
+		newWriteLat := getNewWriteLatency(comparison)
+		fmt.Println("\n⏱️  延迟变化：")
+		fmt.Printf("  读延迟：%.2f ms → %.2f ms (%+.2f ms)\n",
+			oldReadLat, newReadLat, l.ReadLatencyChange)
+		fmt.Printf("  写延迟：%.2f ms → %.2f ms (%+.2f ms)\n",
+			oldWriteLat, newWriteLat, l.WriteLatencyChange)
+	}
+
+	fmt.Println("\n═══════════════════════════════════════════════════════════")
+}
+
+// 辅助函数：获取旧延迟值（需要从 comparison 中提取）
+func getOldLatency(c *history.ComparisonResult) float64 {
+	if c.OldRecord != nil && len(c.OldRecord.LatencyResults) > 0 {
+		return c.OldRecord.LatencyResults[0].ReadLatencyAvg
+	}
+	return 0
+}
+
+func getOldWriteLatency(c *history.ComparisonResult) float64 {
+	if c.OldRecord != nil && len(c.OldRecord.LatencyResults) > 0 {
+		return c.OldRecord.LatencyResults[0].WriteLatencyAvg
+	}
+	return 0
+}
+
+func getNewLatency(c *history.ComparisonResult) float64 {
+	if c.NewRecord != nil && len(c.NewRecord.LatencyResults) > 0 {
+		return c.NewRecord.LatencyResults[0].ReadLatencyAvg
+	}
+	return 0
+}
+
+func getNewWriteLatency(c *history.ComparisonResult) float64 {
+	if c.NewRecord != nil && len(c.NewRecord.LatencyResults) > 0 {
+		return c.NewRecord.LatencyResults[0].WriteLatencyAvg
+	}
+	return 0
+}
+
+// generateJSONReport 生成 JSON 报告
+func generateJSONReport(
+	cfg *config.Config,
+	systemInfos []*checker.SystemInfo,
+	diskResults []*checker.DiskResult,
+	streamResults []*checker.StreamResult,
+	networkResults []checker.NetworkResult,
+	latencyResults []*checker.LatencyResult,
+) error {
+	output := make(map[string]interface{})
+	output["timestamp"] = time.Now().Format(time.RFC3339)
+	output["version"] = Version
+
+	// 系统信息
+	if len(systemInfos) > 0 {
+		sysInfo := systemInfos[0]
+		output["system"] = map[string]interface{}{
+			"host":          sysInfo.Host,
+			"cpu_model":     sysInfo.CPUModel,
+			"cpu_cores":     sysInfo.CPUCore,
+			"total_ram":     utils.FormatBytes(sysInfo.TotalRAM),
+			"os_name":       sysInfo.OSName,
+			"kernel_version": sysInfo.KernelVersion,
+			"nic_speed":     sysInfo.NICSpeed,
+			"is_virtual":    sysInfo.IsVirtual,
+			"virtual_type":  sysInfo.VirtualType,
+		}
+	}
+
+	// 磁盘结果
+	if len(diskResults) > 0 {
+		var diskData []map[string]interface{}
+		for _, r := range diskResults {
+			diskData = append(diskData, map[string]interface{}{
+				"host":               r.Host,
+				"dir":                r.Dir,
+				"write_bandwidth":    fmt.Sprintf("%.2f MB/s", r.WriteBandwidth),
+				"read_bandwidth":     fmt.Sprintf("%.2f MB/s", r.ReadBandwidth),
+				"rand_write_bw":      fmt.Sprintf("%.2f MB/s", r.RandWriteBandwidth),
+				"rand_read_bw":       fmt.Sprintf("%.2f MB/s", r.RandReadBandwidth),
+				"write_time":         r.WriteTime,
+				"read_time":          r.ReadTime,
+				"disk_type":          r.DiskType,
+				"disk_model":         r.DiskModel,
+				"disk_capacity":      r.DiskCapacity,
+				"file_system":        r.FileSystem,
+			})
+		}
+		output["disk"] = diskData
+	}
+
+	// 内存结果
+	if len(streamResults) > 0 {
+		var memData []map[string]interface{}
+		for _, r := range streamResults {
+			memData = append(memData, map[string]interface{}{
+				"host":            r.Host,
+				"copy_bandwidth":  fmt.Sprintf("%.2f MB/s", r.CopyBandwidth),
+				"scale_bandwidth": fmt.Sprintf("%.2f MB/s", r.ScaleBandwidth),
+				"add_bandwidth":   fmt.Sprintf("%.2f MB/s", r.AddBandwidth),
+				"triad_bandwidth": fmt.Sprintf("%.2f MB/s", r.TriadBandwidth),
+				"total_bandwidth": fmt.Sprintf("%.2f MB/s", r.TotalBandwidth),
+			})
+		}
+		output["memory"] = memData
+	}
+
+	// 网络结果
+	if len(networkResults) > 0 {
+		var netData []map[string]interface{}
+		for _, r := range networkResults {
+			netData = append(netData, map[string]interface{}{
+				"source_host": r.SourceHost,
+				"dest_host":   r.DestHost,
+				"bandwidth":   fmt.Sprintf("%.2f MB/s", r.Bandwidth),
+				"latency_avg": fmt.Sprintf("%.2f ms", r.LatencyAvg),
+				"packet_loss": fmt.Sprintf("%.2f%%", r.PacketLoss),
+			})
+		}
+		output["network"] = netData
+	}
+
+	// 延迟结果
+	if len(latencyResults) > 0 {
+		var latData []map[string]interface{}
+		for _, r := range latencyResults {
+			latData = append(latData, map[string]interface{}{
+				"dir":              r.Dir,
+				"read_latency_avg": fmt.Sprintf("%.2f ms", r.ReadLatencyAvg),
+				"write_latency_avg": fmt.Sprintf("%.2f ms", r.WriteLatencyAvg),
+				"read_latency_max": fmt.Sprintf("%.2f ms", r.ReadLatencyMax),
+				"write_latency_max": fmt.Sprintf("%.2f ms", r.WriteLatencyMax),
+				"read_iops":        r.ReadIOPS,
+				"write_iops":       r.WriteIOPS,
+			})
+		}
+		output["latency"] = latData
+	}
+
+	// 智能告警评分
+	advisorInstance := advisor.NewAdvisor(false)
+	analysisReport := advisorInstance.AnalyzeResults(diskResults, streamResults, networkResults, latencyResults)
+	output["advisor"] = map[string]interface{}{
+		"score":         analysisReport.Score,
+		"health_status": analysisReport.HealthStatus,
+		"summary":       analysisReport.Summary,
+		"alerts_count":  len(analysisReport.Alerts),
+	}
+
+	jsonData, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("JSON 序列化失败：%v", err)
+	}
+
+	// 写入文件
+	outputPath := cfg.ReportOutput
+	if outputPath == "" {
+		outputPath = "dbcheckperf_report.json"
+	}
+	if err := os.WriteFile(outputPath, jsonData, 0644); err != nil {
+		return fmt.Errorf("写入文件失败：%v", err)
+	}
+
+	fmt.Printf("\n✅ JSON 报告已生成：%s\n", outputPath)
+	return nil
+}
+
+// ProgressTracker 封装进度条和步骤跟踪
+type ProgressTracker struct {
+	Bar      *progress.ProgressBar
+	Tracker  *progress.StepTracker
+	Estimator *progress.TaskEstimator
+}
+
+// NewProgressTracker 创建进度跟踪器
+func NewProgressTracker(totalSteps int) *ProgressTracker {
+	return &ProgressTracker{
+		Bar:       progress.NewProgressBar(totalSteps, "测试进度"),
+		Estimator: progress.NewTaskEstimator(),
+	}
 }

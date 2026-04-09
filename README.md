@@ -23,6 +23,10 @@ dbcheckperf is a database performance check tool written in Go, based on the Gre
 - **Tabular Output**: Clearly displays test results and summary statistics for each host
 - **Quick Testing**: Single iteration testing for fast performance checks
 - **SSH Password Authentication**: Support testing remote hosts without SSH key-based authentication, using `-F` option to specify authentication file
+- **Smart Advisor & Alerts**: Automatic performance scoring (0-100), health status assessment, three-level alerts (INFO/WARNING/CRITICAL), and actionable optimization suggestions
+- **History Management**: Auto-save test results, baseline comparison with previous runs, trend tracking, and tag-based search
+- **JSON Report Output**: Structured JSON reports for integration with monitoring systems and CMDB
+- **Baseline Comparison**: `--baseline` option automatically compares current results with the last test, showing performance change percentages
 
 ## Installation
 
@@ -83,6 +87,10 @@ dbcheckperf -d <test_dir> -F <ssh_auth_file> [-r ds] [-B <block_size>] [-S <file
 | `--latency-bs <KB>` | Latency and IOPS test block size (KB) | 4KB |
 | `--iostat-interval` | IO statistics sampling interval | 1s |
 | `--net-quality-target` | Network quality test target host | - |
+| `--report <format>` | Report format: html,json,table (default table) | table |
+| `--output <path>` | Report output file path | current dir |
+| `--baseline` | Auto compare with last test result (baseline) | false |
+| `--no-save` | Disable auto-save test results to history | false |
 | `--version` | Display version number | - |
 | `-?` | Display help information | - |
 

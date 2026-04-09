@@ -4,6 +4,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 )
 
@@ -99,6 +100,10 @@ type Config struct {
 	UseDirectIO bool
 	// UseFsync 是否使用 fsync（conv=fsync）
 	UseFsync bool
+	// Baseline 自动与上次结果对比
+	Baseline bool
+	// NoSave 禁用自动保存历史
+	NoSave bool
 }
 
 // DefaultConfig 返回默认配置
@@ -191,6 +196,15 @@ func hasTestType(types []TestType, target TestType) bool {
 		}
 	}
 	return false
+}
+
+// TestTypesString 将测试类型列表转换为字符串
+func (c *Config) TestTypesString() string {
+	var sb strings.Builder
+	for _, t := range c.TestTypes {
+		sb.WriteString(string(t))
+	}
+	return sb.String()
 }
 
 // 错误定义

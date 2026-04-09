@@ -35,7 +35,9 @@
       "Bash(eof)",
       "Bash(sed *)",
       "Bash(mv *)",
-      "Bash(npx *)"
+      "Bash(npx *)",
+      "Bash(./main *)",
+      "Bash(git reset *)"
     ]
   },
   "$version": 3
